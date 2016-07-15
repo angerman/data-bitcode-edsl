@@ -1,0 +1,431 @@
+Destructuring hello.bc, the bitcode generated from
+
+   #include <stdio.h>
+
+   int
+   main(int argc, char ** argv)
+   {
+     printf("hello world\n");
+   }
+
+with clang -c -emit-llvm hello.c
+
+For constants see: http://llvm.org/docs/doxygen/html/namespacellvm_1_1bitc.html
+
+=== Header ====================================================================
+
+Hex: dec0 170b 0000 0000 1400 0000 8c07 0000
+     ^         ^         ^         ^
+     |         |         |         '- 32bits: Length: 0x078c: 1932
+     |         |         '- 32bits: Offset: 14
+     |         '- 32bits: Version: 0
+     '- 32bits: Bitcode Magic Number: 0x0b 0x17 0xc0 0xde
+
+     0700 0001
+     ^        
+     |        
+     |        
+     '- CPU Type
+
+
+=== Bitcode header @ 0x14 ======================================================
+
+Hex: 4243 c0de
+     ^    ^
+     |    '- LLVM IR Magic Nunber: 0xC0 0xDE
+     '- Magic Number: BC
+
+
+=== First Block @ 0x18 =========================================================
+
+Hex:
+0x18  3514 0000 0600 0000
+
+Binary
+     0
+     |
+     10 10110000 1010 000000000000000000 <- align 32 bits
+     ^  ^        ^
+     |  |        '- vbr(4): new abbrev len: 5
+     |  '- vbr(8): block id: 13 - IDENTIFICATION_BLOCK_ID
+     '- abbrev(2): ENTER_SUBBLOCK (1)
+
+32+  0
+     |
+     01100000000000000000000000000000
+     ^
+     '- fixed(32): block length: 6
+
+Hex
+0x20 620c 3024 9296 a6a5 f7d7 ff4e df3e eddf
+     f54f 0b51 804c 0100
+
+body = 01000 11000 <- DEFINE_ABBREV(len: 3)
+       1 10000000  <- lit value 1
+       0 110       <- enc array
+       0 001       <- enc char6
+
+       00100       <- record code 4
+       010010      <- len: 18
+       010110 100101 100101 101001 <- 'A','P','P','L'
+       011110 111111 101011 111111 <- 'E','_','1','_'
+       110111 001011 111011 011111 <- '7','0','3','.'
+       001011 011111 111011 101011 <- '0','.','3','1'
+       111111 001011               <- '_','0'
+
+       01000 01000 <- DEFINE_ABBREV(len: 2)
+       1 01000000  <- lit value 2
+       0 010 01100 <- env vbr(6)
+
+       10100       <- record code 5
+       000000      <- vbr6:0
+       00000       <- END BLOCK
+       00          <- align 32 bits
+
+
+
+
+0x20 01000 11000 
+     ^     ^
+     |     '- vbr(5): Num abbrev ops: 3
+     '- abbrev(5): DEFINE_ABBREV - 4
+
+     10
+     |
+     1 1000 0000
+     ^ ^
+     | '- vbr(8): 1
+     '- lit
+
+     19
+     |
+     0 110 <- Array                    | Array of Char6
+                                       |
+     23                                |
+     |                                 |
+     0 001 <- Char6                    |
+
+
+     Record:
+     00100 0
+     vbr6:4
+
+0x24  0100 1001 0110 1001 0110 0101 1010 0101
+0x28  1110 1111 1110 1011 1111 1111 0111 0010 +32
+0x3b  1111 1011 0111 1100 1011 0111 1111 1011 +64
+0x3f  1010 1111 1111 0010 1101 0000 1000 1010 +96
+0x44  0000 0001 0011 0010 1000 0000 0000 0000 +128
+
+      0
+      |
+      010010  
+     vbr6:18
+
+      6
+      |
+      010110 -> op0:  26 -> 'A'
+      100101 -> op1:  41 -> 'P'
+      100101 -> op2:  41 -> 'P'
+      101001 -> op3:  37 -> 'L'
+      011110 -> op4:  30 -> 'E'
+      111111 -> op5:  63 -> '_'
+      101011 -> op6:  53 -> '1'
+      111111 -> op7:  63 -> '_'
+      110111 -> op8:  59 -> '7'
+      001011 -> op9:  52 -> '0'
+      111011 -> op10: 55 -> '3'
+      011111 -> op11: 62 -> '.'
+      001011 -> op12: 52 -> '0'
+      011111 -> op13: 62 -> '.'
+      111011 -> op14: 55 -> '3'
+      101011 -> op15: 53 -> '1'
+      111111 -> op16: 63 -> '_'
+      001011 -> op17: 52 -> '0'
+
+
+     114
+     |
+     01000 01000
+     ^     ^
+     |     '- vbr(5): Num abbrev ops: 2
+     '- abbrev(5): DEFINE_ABBREV
+
+          128
+          |
+     1 01000000 
+     ^ ^
+     | '- vbr(8): 2
+     '- lit
+
+     133
+     |
+     0 010 01100
+     ^ ^   ^
+     | |   '- vbr(5): data - 6
+     | '- encoding 2: vbr
+     '- non lit
+
+     Record
+     141
+     |
+     10100 0 000000
+     vbr6:5  vbr6:0
+
+     153   159
+     |     |
+     00000 0 <- align 32 bits
+     ^ 
+     '- abbrev(5): END_BLOCK
+
+=== Next Block @ 0x38 ==========================================================
+
+Hex: 210c 0000 d801 0000
+
+Binary
+     0                                 31
+     |                                 |
+     10 00010000 1100 000000000000000000 <- align 32 bits
+     ^  ^        ^
+     |  |        '- vbr(4): new abbrev len: 3 bits
+     |  '- vbr(8): Block id - 8 (MODULE_BLOCK)
+     '- fixed(3): Abbrev id: 1 - enter sub block
+
+32+  0   4   8
+     |   |   |
+     00011011100000000000000000000000
+     ^
+     '- fixed(32): block length 256+128+64+16+8=472
+
+Hex: 0b82 2000 0200 0000 1300 0000           <- BLOCK INFO BLOCK
+     0781 2391 41c8 0449 0610 3239 9201 840c <- BODY (19)
+     2505 0819 1e04 8b62 8010 4502 4292 0b42
+     8410 3214 3808 184b 0a32 4288 4890 1420
+     4346 88a5 0019 3242 e448 0e90 1122 c450
+     4151 818c e183 e58a 0421 4606
+
+Binary
+     0
+     |
+     110 100000 100000 100000 
+     ^   ^      ^      ^
+     |   |      |      '- vbr(6): op1: 1 | VERSION = 1
+     |   |      '- vbr(6): 1 - #Ops      |
+     |   '- vbr(6): code 1 - VERSION     |
+     '- fixed(3): 3 - UNABBREV_RECORD    |
+     
+     21           32                              63
+     |            |                               |
+     100 00000000 0100 0000000000000000000000000000 <- align 32 bits
+     ^   ^        ^    
+     |   |        '- vbr(4): New abbrev len: 2
+     |   '- vbr(8): Block id 0 - BLOCKINFO
+     '- fixed(3): Abbrev id 1 - ENTER_SUBBLOCK
+
+64+  0
+     |
+     1100 1000 0000 0000 0000 0000 0000 0000
+     ^
+     '- fixed(32): block length 16+2+1 = 19
+
+     -- body
+     11 10 0000 1000 0001 1100 0100 1000 1001
+     
+
+-- body decoding still missing --
+
+== MODULE_BLOCK(3) / PARAMATTR_GROUP_BLOCK_ID(3) ===============================
+Hex 
+0x98 5118 0000 e200 0000
+     1bfa 24f8 ffff ffff 0190 000d 0803 821c
+     d261 1ec2 411c d8a1 1cda 801e c221 1dd8
+     a10d c621 1cd8 811d e601 3087 7060 8779
+
+Binary
+0x98 0
+     |
+     100 01010000 1100 00000000000000000 <- align 32 bits
+     ^   ^        ^
+     |   |        '- vbr(4): New abbrev len: 3
+     |   '- vbr(8): Block id 10 - PARAMATTR_GROUP_BLOCK_ID
+     '- fixed(3): Abbrev id 1 - ENTER_SUBBLOCK
+
+0x9c 32
+     |
+     0100 0111 0000 0000 0000 0000 0000 0000
+     ^
+     |
+     '- fixed(32): block length: 256+64+32+2 = 226
+
+0xa0 0
+     |
+     110 11000 - Unabbrev: 3
+
+     0 101 1 11100100 1 00000111 11111111 11111111 11111111 11111111 11
+     
+     -- Skip 226 32bit blocks. --
+     0x428 = 0x9c + 4 + 4 * 226
+
+
+
+== MODULE_BLOCK(3) / PARAMATTR_BLOCK(3) ========================================
+Hex 
+0x428 4918 0000 0200 0000
+
+Binary
+0x428 0
+      |
+      100 10010000 1100 00000000000000000 <- align 32 bits
+      ^   ^        ^
+      |   |        '- vbr(4): New abbrev len: 3
+      |   '- vbr(8): Block id 9 - PARAMATTR_BLOCK
+      '- fixed(3): Abbrev id 1 - ENTER_SUBBLOCK
+
+      32
+      |
+      01000000000000000000000000000000
+      ^
+      '- fixed(32): block length: 2
+
+~ Body
+Hex
+0x430 1382 6042 2000 0000 
+
+Binary
+0x430 0
+      |
+      110 010000 100000 100000 
+      ^   ^      ^      ^
+      |   |      |      '- vbr(6): op0 1
+      |   |      '- vbr(6): #ops 1
+      |   '- vbr(6): code 2 - CODE_ENTRY
+      '- fixed(3): Abbrev id 3 - UNABBREV_RECORD
+
+      21           32
+      |            |
+      110 010000 100000 010000
+      ^   ^      ^      ^
+      |   |      |      '- vbr(6): op1 2
+      |   |      '- vbr(6): #ops 1
+      |   '- vbr(6): code 2 - CODE_ENTRY
+      '- fixed(3): Abbrev id 3 - UNABBREV_RECORD
+
+      42
+      |
+      000 0000000000000000000 <- align 32 bits
+      ^
+      '- fixed(3): Abbrev id 1 - END_BLOCK
+      
+== MODULE_BLOCK(3) / TYPE_BLOCK_ID(4) ==========================================
+Hex
+0x438 8920 0000 0e00 0000
+
+Binary
+0x438 0
+      |
+      100 10001000 0010 00000000000000000 <- align 32 bits
+      ^   ^        ^
+      |   |        '- vbr(4): New abbrev len 4
+      |   '- vbr(8): Block id 17 - TYPE_BLOCK_ID
+      '- fixed(3): Abbrev id 1 - ENTER_SUBBLOCK
+      32
+      |
+      0111 0000 0000 0000 0000 0000 0000 0000
+      ^
+      '- fixed(32): block length: 14
+
+~ Body
+Hex
+0x440 3222 0809 2064 8504 1322 a484 0413 22e3
+      84a1 9014 124c 888c 0b84 844c 1038 7304
+      4836 00c5 1c01 1810 1095 61a6 c8aa 3044
+      3810 4043 3502 0000
+
+Binary
+0x400 0
+      |
+      ...
+== MODULE_BLOCK(3) / UNABBREV_RECORD(code: 2, 26ops, ...) ======================
+Hex
+0x478 1334 7cc0 033b f805 3ba0 8336 0807 7880
+      0776 2887 3668 8770 1887 7798 077c 8803
+      3870 8338 8803 3780 83
+
+Binary
+0x478 0
+      |
+      110 010000 010110
+      ^   ^      ^      
+      |   |      '- vbr(6): #ops 26
+      |   '- vbr(6): code 2 - MODULE_CODE_TRIPLE
+      '- UNABBREV_RECORD
+
+      15
+      |
+      000111 110000
+      ^
+      '- op0: 16+8 + 2^5 * (1+2) = 120
+
+      27   32
+      |    |
+      000111 100000
+      ^
+      '- op1: 16+8 + 2^5 = 56
+
+      39
+      |
+      011011 100000
+      ^
+      '- op2: 16+4+2+2^5 = 54
+      51
+      |
+      111111 010000
+      ^
+      '- op3: 32-1+2^5*2 = 95
+      
+       64
+       |
+      011011 100000 -> op4  = 54
+      001011 100000 -> op5  = 52
+      101101 100000 -> op6  = 45
+      100001 110000 -> op7  = 97
+      000011 110000 -> op8  = 112
+      000011 110000 -> op9  = 112
+      001101 110000 -> op10  = 108
+      101001 110000 -> op11 = 101
+      101101 100000 -> op12 = 45
+      101101 110000 -> op13 = 109
+      100001 110000 -> op14 = 97
+      110001 110000 -> op15 = 99
+      111101 110000 -> op16 = 111
+      110011 110000 -> op17 = 115
+      000111 110000 -> op18 = 120
+      100011 100000 -> op19 = 49
+      000011 100000 -> op20 = 48
+      011101 100000 -> op21 = 46
+      100011 100000 -> op22 = 49
+      100011 100000 -> op23 = 49
+      011101 100000 -> op24 = 46
+      000011 100000 -> op25 = 48
+
+== MODULE_BLOCK(3) / UNABBREV_RECORD(code: 2, 26ops, ...) ======================
+
+Hex
+0x4a5   0d 6550 0e6d d00e 7af0 0e6d 900e 7640
+      077a 6007 74d0 06e6 8007 70a0 0771 2007
+
+Binary (note, we have one bit left from the previous block)
+
+                8
+                |
+0x4a5          110 110000 101001 100000
+               ^   ^      ^
+               |   |      '- vbr(6): ops: 37
+               |   '-vbr(6): code 3 - MODULE_CODE_DATALAYOUT
+               '- UNABBREV_RECORD
+      28   32
+      |    |
+      1010 1100 0001 1011 0000 1010 0110 0000 1010
+
+
+
+================================================================================
