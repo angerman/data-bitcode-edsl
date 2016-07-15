@@ -1,6 +1,6 @@
 {-# LANGUAGE TupleSections     #-}
 {-# LANGUAGE LambdaCase        #-}
-module Data.BitCode.Reader.FromBitCode where
+module Data.BitCode.Reader.FromBits where
 
 import Data.Word (Word8, Word64)
 import Control.Applicative ((<|>))
@@ -15,8 +15,8 @@ import Data.BitCode.Reader.Combinators
 import Data.BitCode.IDs.FixedAbbrev
 
 
--- * FromBitCode instances
-instance FromBitCode EncVal where
+-- * FromBits instances
+instance FromBits EncVal where
   parse = parseFixedVal <|> parseVBRVal <|> parseArr <|> parseChar6 <|> parseBlob
     where parseFixedVal :: BitCodeReader EncVal
           parseFixedVal = Fixed <$> ((readFixed 3 (1 :: Word8)) *> parseVBR 5)
@@ -29,12 +29,12 @@ instance FromBitCode EncVal where
           parseBlob     :: BitCodeReader EncVal
           parseBlob     = readFixed 3 (5 :: Word8) >> pure Blob
 
-instance FromBitCode Op where
+instance FromBits Op where
   parse = parseLit <|> parseEnc
     where parseLit = Lit <$> (readBit True *> parseVBR 8)
           parseEnc = Enc <$> (readBit False *> parse)
 
-instance FromBitCode Char where
+instance FromBits Char where
   parse = decodeChar6 <$> parseFixed 6
     where decodeChar6 :: Int -> Char
           decodeChar6 63 = '_'
@@ -49,7 +49,7 @@ parseEncField (Enc (Fixed n):xs) = (,xs) . pure . Fix (fromIntegral n) <$> parse
 parseEncField (Enc (VBR n):xs)   = (,xs) . pure . Vbr (fromIntegral n) <$> parseVBR (fromIntegral n)
 parseEncField (Enc Arr:op:xs)    = do len <- parseVBR 6
                                       fields <- replicateM len (fst <$> parseEncField [op])
-                                      return ((Vbr 6 (fromIntegral len)):concat fields, xs)
+                                      return ((Len (fromIntegral len)):concat fields, xs)
 parseEncField (Enc Char6:xs)     = (,xs) . pure . Chr <$> parse
 
 parseBlock :: Int -> AbbrevMap -> BitCodeReader Block

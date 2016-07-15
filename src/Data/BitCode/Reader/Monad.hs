@@ -6,7 +6,7 @@ module Data.BitCode.Reader.Monad
   , readBits
   , ppBitCode
   , fromByte
-  , FromBitCode(..)
+  , FromBits(..)
   , tellGlobalAbbrev, askGlobalAbbrevs
   )
   where
@@ -36,7 +36,7 @@ import Control.Applicative (Alternative(..))
 import Data.BitCode
 import Data.BitCode.Abbreviation
 
-class FromBitCode a where
+class FromBits a where
   parse :: BitCodeReader a
 
 data BitC = BitC { _words :: !Int

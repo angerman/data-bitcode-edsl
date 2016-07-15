@@ -9,7 +9,7 @@ import Data.BitCode.Abbreviation
 
 import Data.BitCode.Reader.Monad
 import Data.BitCode.Reader.Combinators
-import Data.BitCode.Reader.FromBitCode
+import Data.BitCode.Reader.FromBits
 
 readFile :: FilePath -> IO (Either String [Block])
 readFile f = flip fmap (readBits f) . evalBitCodeReader $ do

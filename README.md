@@ -1,6 +1,6 @@
 # Data.BitCode
 
-Pure haskell support for reading and writing the BitCode protocol.
+Pure haskell support for reading and writing the BitCode Container Format.
 
 -- 
 
@@ -15,3 +15,5 @@ Pure haskell support for reading and writing the BitCode protocol.
 - [ ] Add support to obtain the current abbreviationWidth from the reader monad (push, pop?).
 - [ ] Extensive haddock documentaiton
 - [ ] Add doc tests to make verify it works; and for documentation.
+- [ ] Compare LLVM  IR/*.h diffs and add @since@ flags.
+- [x] Rename From/ToBitCode to From/ToBits

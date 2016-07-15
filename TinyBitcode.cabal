@@ -19,15 +19,16 @@ library
                      , Data.BitCode.Writer
                      , Data.BitCode.Writer.Monad
                      , Data.BitCode.Writer.Combinators
-                     , Data.BitCode.Writer.ToBitCode
+                     , Data.BitCode.Writer.ToBits
                      , Data.BitCode.Reader
                      , Data.BitCode.Reader.Monad
                      , Data.BitCode.Reader.Combinators
-                     , Data.BitCode.Reader.FromBitCode
+                     , Data.BitCode.Reader.FromBits
                      , Data.BitCode.AbbrevOpEncoding
                      , Data.BitCode.Codes.BlockInfo
                      , Data.BitCode.IDs.FixedAbbrev
                      , Data.BitCode.IDs.StandardBlock
+                     -- * LLVM
                      , Data.BitCode.LLVM
                      , Data.BitCode.LLVM.IDs.Blocks
                      , Data.BitCode.LLVM.Codes.Identification

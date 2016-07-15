@@ -5,7 +5,7 @@ module Data.BitCode.Writer.Monad
   , evalBitCodeWriter, execBitCodeWriter
   , tell, ask
   , writeFile, ppBitCodeWriter
-  , ToBitCode(..)
+  , ToBits(..)
   )
   where
 
@@ -42,7 +42,7 @@ evalBitCodeWriter = fst . runBitCodeWriter
 execBitCodeWriter :: BitCodeWriter a -> Bits
 execBitCodeWriter = _body . snd . runBitCodeWriter
 
-class ToBitCode a where
+class ToBits a where
   emit :: a -> BitCodeWriter ()
 
 -- * Functor
