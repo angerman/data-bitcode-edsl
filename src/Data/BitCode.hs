@@ -11,6 +11,8 @@ type Bits = [Bool]
 type BlockID = Int
 type Code    = Int
 
+type Loc = (Int, Int) -- Words, Bits
+
 --- Bit Codes ------------------------------------------------------------------
 -- see BitCodes.h (e.g. http://llvm.org/docs/doxygen/html/BitCodes_8h_source.html)
 
@@ -63,5 +65,6 @@ data Block
   | AbbrevRecord { aRecordCode :: !Int
                  , aRecordFields :: ![Field]
                  }
+  | Located { unLoc :: Block, srcLoc :: (Loc, Loc)}
     deriving Show
 

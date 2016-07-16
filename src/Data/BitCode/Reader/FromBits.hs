@@ -53,8 +53,12 @@ parseEncField (Enc Arr:op:xs)    = do len <- parseVBR 6
 parseEncField (Enc Char6:xs)     = (,xs) . pure . Chr <$> parse
 
 parseBlock :: Int -> AbbrevMap -> BitCodeReader Block
-parseBlock n abbrevs = parseSubBlock n <|> parseUnabbrevRecord n <|> parseDefAbbrevRecord n <|> parseAbbrevRecord n abbrevs
-  where parseSubBlock :: Int -> BitCodeReader Block
+parseBlock n abbrevs = parseLocated (parseSubBlock n <|> parseUnabbrevRecord n <|> parseDefAbbrevRecord n <|> parseAbbrevRecord n abbrevs)
+  where parseLocated b = do start <- ask
+                            block <- b
+                            end   <- ask
+                            return $ Located block (start, end)
+        parseSubBlock :: Int -> BitCodeReader Block
         parseSubBlock width = do
           readFixed width (fromEnum ENTER_SUBBLOCK)
           id       <- parseVBR 8
@@ -70,6 +74,7 @@ parseBlock n abbrevs = parseSubBlock n <|> parseUnabbrevRecord n <|> parseDefAbb
                   processBlockInfo = go 0
                     where go :: Int -> [Block] -> BitCodeReader ()
                           go _ [] = pure ()
+                          go id (Located r _:bs) = go id (r:bs) -- ignore Located blocks, and just recurse to the contained block.
                           go _ ((UnabbrevRecord 1 [id]):bs) = go (fromIntegral id) bs
                           go id (r@(DefAbbrevRecord _):bs) = tellGlobalAbbrev id r >> go id bs
                           go id (b:bs) = fail $ "*** Can not handle block: " ++ show b
@@ -116,5 +121,5 @@ parseStream = go
         go n abbrevs = do
           (Just <$> parseBlock n abbrevs <|> pure Nothing) >>= \case
             Nothing -> return []
-            Just r@(DefAbbrevRecord ops) -> (r:) <$> go n (addAbbrev abbrevs r)
+            Just l@(Located r@(DefAbbrevRecord ops) _) -> (l:) <$> go n (addAbbrev abbrevs r)
             Just r -> (r:) <$> go n abbrevs
