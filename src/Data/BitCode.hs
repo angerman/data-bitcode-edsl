@@ -32,8 +32,9 @@ data Op = Lit !Val          -- [1,vbr8:val]
         deriving Show
 
 -- | The Fields contained in an abbreviated record can be one of the following.
-data Field = Vbr !Int !Word64
-           | Fix !Int !Word64
+data Field = Vbr !Int !Val
+           | Fix !Int !Val
+           | Len !Val
            | Chr !Char
            | W64 !Val         -- Literal values. These are not bein emitted.
                               -- WARN: this is somewhat a hack, to make parsing and writing identical to id,
@@ -56,13 +57,14 @@ data Block
           , blockBody      :: ![Block] -- ^ body
           }
   -- | A abbreviation definition record. Layout: [2,vbr5:#ops,op0,op1,...]
-  | DefAbbrevRecord { defRecordOps :: ![Op] }
+  | DefAbbrevRecord { defRecordOps :: ![Op]
+                    }
   -- | An unabbreviated record. Layout: [3,vbr6:code,vbr6:#ops,vbr6:op0,...]
-  | UnabbrevRecord { uRecordCode :: !Word64  -- ^ code         encoded vbr6
-                   , uRecordOps :: ![Word64] -- ^ generic ops, encoded vbr6
+  | UnabbrevRecord { uRecordCode :: !Val  -- ^ code         encoded vbr6
+                   , uRecordOps :: ![Val] -- ^ generic ops, encoded vbr6
                    }
   -- | An abbreviated record. Layout [<abbrevcode>, fields, ...]
-  | AbbrevRecord { aRecordCode :: !Int
+  | AbbrevRecord { aRecordCode   :: !Int
                  , aRecordFields :: ![Field]
                  }
   | Located { unLoc :: Block, srcLoc :: (Loc, Loc)}
