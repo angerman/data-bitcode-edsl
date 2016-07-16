@@ -70,3 +70,35 @@ data Block
   | Located { unLoc :: Block, srcLoc :: (Loc, Loc)}
     deriving Show
 
+
+-- | Records
+-- Records can come either as a combination of DefAbbrevRecord + AbbrevRecord or an UnabbrevRecord
+type Record = (Code, [Val])
+
+class ToRecord a where
+  toRecord :: a -> Maybe Record
+
+instance ToRecord Block where
+  toRecord (UnabbrevRecord code ops) = Just (fromIntegral code, ops)
+  toRecord (AbbrevRecord _ flds) = let (code:ops) = map toVal . filter (not . isControl) $ flds
+                                   in Just (fromIntegral code, ops)
+    where
+      -- As Abbreviated records can contain arrays, and
+      -- arrays have thier length encoded in the field,
+      -- Ops is anything but array length.
+      --
+      -- NOTE: This way we don't have to go back to the
+       --       abbrev definition to figure out which
+      --       ops are control ops and which are not.
+      isControl :: Field -> Bool
+      isControl (Len _) = True
+      isControl _       = False
+
+      toVal :: Field -> Val
+      toVal (Vbr _ n) = n
+      toVal (Fix _ n) = n
+      toVal (Len _)   = error "Len is a control op"
+      toVal (Chr c)   = fromIntegral . fromEnum $ c
+      toVal (W64 v)   = v
+
+  toRecord _ = Nothing
