@@ -18,7 +18,7 @@ data Type
   | OPAQUE -- 6
   -- | INTEGER: @[width]@
   | INTEGER -- 7
-  -- | POINTER: @[pointee type]@
+  -- | POINTER: @[pointee type, address space]@ -- address space is optional, defaults to 0.
   | POINTER -- 8
   -- | FUNCTION: @[vararg, attrid, retty, paramty x N]@
   | FUNCTION_OLD -- 9

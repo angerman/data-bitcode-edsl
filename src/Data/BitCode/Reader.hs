@@ -11,8 +11,8 @@ import Data.BitCode.Reader.Monad
 import Data.BitCode.Reader.Combinators
 import Data.BitCode.Reader.FromBits
 
-readFile :: FilePath -> IO (Either String [Block])
+readFile :: FilePath -> IO (Either String [BitCode])
 readFile f = flip fmap (readBits f) . evalBitCodeReader $ do
-  parseHeader
+  optional parseHeader
   parseLLVMIRHeader
   parseStream 2 mempty

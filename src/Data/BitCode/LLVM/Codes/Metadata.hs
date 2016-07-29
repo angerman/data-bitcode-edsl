@@ -1,6 +1,6 @@
 module Data.BitCode.LLVM.Codes.Metadata where
 
-data MetadataCodes
+data Metadata
   = METADATA_UNUSED0 -- 0
   -- | MDSTRING:      [values]
   | METADATA_STRING -- 1

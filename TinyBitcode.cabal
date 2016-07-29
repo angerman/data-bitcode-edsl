@@ -30,6 +30,7 @@ library
                      , Data.BitCode.IDs.StandardBlock
                      -- * LLVM
                      , Data.BitCode.LLVM
+                     , Data.BitCode.LLVM.FromBitCode
                      , Data.BitCode.LLVM.IDs.Blocks
                      , Data.BitCode.LLVM.Codes.Identification
   build-depends:       base >= 4.7 && < 5

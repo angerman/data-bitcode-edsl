@@ -2,7 +2,7 @@ module Data.BitCode.LLVM.Codes.Function where
 
 -- | The function body block (FUNCTION_BLOCK_ID) describes function bodies.  It
 -- can contain a constant block (CONSTANTS_BLOCK_ID).
-data Function
+data Instruction
   = FUN_CODE_UNUSED0
   -- | DECLAREBLOCKS: [n]
   | FUNC_CODE_DECLAREBLOCKS -- 1
@@ -69,7 +69,9 @@ data Function
   | FUNC_CODE_UNUSED32
   -- | DEBUG_LOC_AGAIN
   | FUNC_CODE_DEBUG_LOC_AGAIN -- 33
-  -- | CALL:    [attr, cc, fnty, fnid, args...]
+  -- | CALL:    [paramattrs, cc[, fmf][, fnty], fnid, arg0, arg1...]
+  -- fast math flag is set if the CallMarker FMF is present in the cc.
+  -- fnty is set if the CallMaker ExplicitType is set.
   | FUNC_CODE_INST_CALL -- 34
   -- | DEBUG_LOC:  [Line,Col,ScopeVal, IAVal]
   | FUNC_CODE_DEBUG_LOC -- 35

@@ -32,8 +32,8 @@ instance ToBits Field where
   emit (Len n)   = emitVBR 6 n
   emit (W64 w)   = emitVBR 8 w
 
-instance ToBits (Int,Block) where
-  emit (width, (Located block _))   = emit (width, block)
+instance ToBits (Int, BitCode) where
+  emit (width, (Located _ block))   = emit (width, block)
   emit (width, (Block id len body)) = do
     emitFixed width $ fromEnum ENTER_SUBBLOCK
     emitVBR 8 id

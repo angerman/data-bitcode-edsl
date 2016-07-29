@@ -52,13 +52,13 @@ parseEncField (Enc Arr:op:xs)    = do len <- parseVBR 6
                                       return ((Len (fromIntegral len)):concat fields, xs)
 parseEncField (Enc Char6:xs)     = (,xs) . pure . Chr <$> parse
 
-parseBlock :: Int -> AbbrevMap -> BitCodeReader Block
+parseBlock :: Int -> AbbrevMap -> BitCodeReader BitCode
 parseBlock n abbrevs = parseLocated (parseSubBlock n <|> parseUnabbrevRecord n <|> parseDefAbbrevRecord n <|> parseAbbrevRecord n abbrevs)
   where parseLocated b = do start <- ask
                             block <- b
                             end   <- ask
-                            return $ Located block (start, end)
-        parseSubBlock :: Int -> BitCodeReader Block
+                            return $ Located (start, end) block
+        parseSubBlock :: Int -> BitCodeReader BitCode
         parseSubBlock width = do
           readFixed width (fromEnum ENTER_SUBBLOCK)
           id       <- parseVBR 8
@@ -70,15 +70,15 @@ parseBlock n abbrevs = parseLocated (parseSubBlock n <|> parseUnabbrevRecord n <
           skipTo32bits
           if id == 0 then processBlockInfo blocks else return ()
           return $ Block id newWidth blocks
-            where processBlockInfo :: [Block] -> BitCodeReader ()
+            where processBlockInfo :: [BitCode] -> BitCodeReader ()
                   processBlockInfo = go 0
-                    where go :: Int -> [Block] -> BitCodeReader ()
+                    where go :: Int -> [BitCode] -> BitCodeReader ()
                           go _ [] = pure ()
-                          go id (Located r _:bs) = go id (r:bs) -- ignore Located blocks, and just recurse to the contained block.
+                          go id (Located _ r:bs) = go id (r:bs) -- ignore Located blocks, and just recurse to the contained block.
                           go _ ((UnabbrevRecord 1 [id]):bs) = go (fromIntegral id) bs
                           go id (r@(DefAbbrevRecord _):bs) = tellGlobalAbbrev id r >> go id bs
                           go id (b:bs) = fail $ "*** Can not handle block: " ++ show b
-        parseUnabbrevRecord :: Int -> BitCodeReader Block
+        parseUnabbrevRecord :: Int -> BitCodeReader BitCode
         parseUnabbrevRecord width = do
           readFixed width (fromEnum UNABBREV_RECORD)
           code     <- parseVBR 6
@@ -89,7 +89,7 @@ parseBlock n abbrevs = parseLocated (parseSubBlock n <|> parseUnabbrevRecord n <
                   parseOps 0 = pure []
                   parseOps 1 = pure <$> parseVBR 6
                   parseOps n = (:) <$> parseVBR 6 <*> parseOps (n-1)
-        parseDefAbbrevRecord :: Int -> BitCodeReader Block
+        parseDefAbbrevRecord :: Int -> BitCodeReader BitCode
         parseDefAbbrevRecord width = do
           readFixed width (fromEnum DEFINE_ABBREV)
           len      <- parseVBR 5
@@ -98,7 +98,7 @@ parseBlock n abbrevs = parseLocated (parseSubBlock n <|> parseUnabbrevRecord n <
             where parseOps :: Int -> BitCodeReader [Op]
                   parseOps 1 = pure <$> parse
                   parseOps n = (:) <$> parse <*> parseOps (n-1)
-        parseAbbrevRecord :: Int -> AbbrevMap -> BitCodeReader Block
+        parseAbbrevRecord :: Int -> AbbrevMap -> BitCodeReader BitCode
         parseAbbrevRecord width abbrevs = do
           code   <- parseFixed width
           if code < 4
@@ -115,11 +115,11 @@ parseBlock n abbrevs = parseLocated (parseSubBlock n <|> parseUnabbrevRecord n <
                                                 [] -> return flds
                                                 _  -> (flds++) <$> parseAbbrevRecord' ops'
 
-parseStream :: Int -> AbbrevMap -> BitCodeReader [Block]
+parseStream :: Int -> AbbrevMap -> BitCodeReader [BitCode]
 parseStream = go
-  where go :: Int -> AbbrevMap -> BitCodeReader [Block]
+  where go :: Int -> AbbrevMap -> BitCodeReader [BitCode]
         go n abbrevs = do
           (Just <$> parseBlock n abbrevs <|> pure Nothing) >>= \case
             Nothing -> return []
-            Just l@(Located r@(DefAbbrevRecord ops) _) -> (l:) <$> go n (addAbbrev abbrevs r)
+            Just l@(Located _ r@(DefAbbrevRecord ops)) -> (l:) <$> go n (addAbbrev abbrevs r)
             Just r -> (r:) <$> go n abbrevs

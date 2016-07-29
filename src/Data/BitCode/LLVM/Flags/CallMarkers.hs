@@ -11,3 +11,4 @@ data CallMarkers
   | CALL_NOTAIL -- 16
   -- | Call has optional fast-math-flags.
   | CALL_FMF -- 17
+  deriving (Enum, Show)

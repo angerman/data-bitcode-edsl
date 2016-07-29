@@ -5,7 +5,7 @@ module Data.BitCode.LLVM.StorageClass where
 data DLLStorageClass
   = Default -- 0
   -- | Function to be imported from DLL
-  | DLLImport -- 0
+  | DLLImport -- 1
   -- | Function to be accessible from DLL.
-  | DLLExport -- 0
+  | DLLExport -- 2
   deriving (Enum, Show)

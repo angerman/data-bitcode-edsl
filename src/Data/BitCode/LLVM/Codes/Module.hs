@@ -1,7 +1,7 @@
 module Data.BitCode.LLVM.Codes.Module where
 
 -- | MODULE blocks have a number of optional fields and subblocks.
-data ModuleCodes
+data ModuleCode
   = SKIP -- 0
   -- | VERSION: [version#]
   | VERSION -- 1
@@ -15,9 +15,9 @@ data ModuleCodes
   | SECTIONNAME -- 5
   -- | DEPLIB: [strchr x N].  WARN: Will be removed in 4.0.
   | DEPLIB -- 6
-  -- | GLOBALVAR: [pointer type, isconst, initid, linkage, alignment, section, visibility, threadlocal]
+  -- | GLOBALVAR: [pointer type, isconst, initid, linkage, alignment, section, visibility, threadlocal, unnamed_addr, externally_initialized, dllstorageclass, comdat]
   | GLOBALVAR -- 7
-  -- | FUNCTION:  [type, callingconv, isproto, linkage, paramattrs, alignment, section, visibility, gc, unnamed_addr]
+  -- | FUNCTION:  [type, callingconv, isproto, linkage, paramattr, alignment, section, visibility, gc, unnamed_addr, prologuedata, dllstorageclass, comdat, prefixdata, personality]
   | FUNCTION -- 8,
   -- | ALIAS: [alias type, aliasee val#, linkage, visibility]
   | ALIAS_OLD --  9

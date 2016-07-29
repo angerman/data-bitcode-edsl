@@ -1,7 +1,8 @@
 {-# LANGUAGE RankNTypes #-}
 module Data.BitCode where
 
-import Data.Word (Word32, Word64)
+import Data.Word  (Word32, Word64)
+import Data.Maybe (catMaybes)
 
 -- * Bits
 type Bit = Bool
@@ -48,13 +49,13 @@ data Field = Vbr !Int !Val
 -- on the container they are in.  The top level blocks are emitted with an abbreviation
 -- width of 2. This allows the following four block types, which allow to define any
 -- other set of blocks.
-data Block
+data BitCode
   -- | Combine ENTER_SUBBLOCK(1) with END_BLOCK(0)
   -- Layout: [1,vbr8:id,vbr4:newabbrevlen,<align32bits>,32bit:blocklen,<blocklen * words>,0,<align32bits>]
   -- 1 and 0 are vbr(current abbrev len); starting with 2 at the top level.
   = Block { blockId        :: !Int     -- ^ id
           , blockAbbrevLen :: !Int     -- ^ abbrev len
-          , blockBody      :: ![Block] -- ^ body
+          , blockBody      :: ![BitCode] -- ^ body
           }
   -- | A abbreviation definition record. Layout: [2,vbr5:#ops,op0,op1,...]
   | DefAbbrevRecord { defRecordOps :: ![Op]
@@ -67,21 +68,32 @@ data Block
   | AbbrevRecord { aRecordCode   :: !Int
                  , aRecordFields :: ![Field]
                  }
-  | Located { unLoc :: Block, srcLoc :: (Loc, Loc)}
-    deriving Show
+  | Located { srcLoc :: (Loc, Loc), unLoc :: !BitCode }
+  deriving Show
 
+-- | BitCode contains some additional control information,
+-- like abbreviation records, or the BLOCKINFO block, which
+-- assist in decoding, but provide no information after
+-- parsing the bitcode. Normalized bitcode is a simpler
+-- structure consisting of only Blocks and Records.
+--
+-- Note: Normalized BitCode will erase location information.
+data NBitCode
+  = NBlock !Int ![NBitCode]
+  | NRec   !Int ![Val]
+  deriving Show
 
--- | Records
--- Records can come either as a combination of DefAbbrevRecord + AbbrevRecord or an UnabbrevRecord
-type Record = (Code, [Val])
+class ToNBitCode a where
+  normalize :: a -> Maybe NBitCode
 
-class ToRecord a where
-  toRecord :: a -> Maybe Record
-
-instance ToRecord Block where
-  toRecord (UnabbrevRecord code ops) = Just (fromIntegral code, ops)
-  toRecord (AbbrevRecord _ flds) = let (code:ops) = map toVal . filter (not . isControl) $ flds
-                                   in Just (fromIntegral code, ops)
+instance ToNBitCode BitCode where
+  normalize (Block 0 _ _) = Nothing
+  normalize (Block id _ b) = Just (NBlock id (catMaybes . map normalize $ b))
+  normalize (DefAbbrevRecord{}) = Nothing
+  normalize (Located _ bs) = normalize bs
+  normalize (UnabbrevRecord c vs) = Just (NRec (fromIntegral c) vs)
+  normalize (AbbrevRecord _ flds) = let (code:ops) = map toVal . filter (not . isControl) $ flds
+                                   in Just (NRec (fromIntegral code) ops)
     where
       -- As Abbreviated records can contain arrays, and
       -- arrays have thier length encoded in the field,
@@ -101,4 +113,13 @@ instance ToRecord Block where
       toVal (Chr c)   = fromIntegral . fromEnum $ c
       toVal (W64 v)   = v
 
-  toRecord _ = Nothing
+records :: (Enum a) => [NBitCode] -> [(a, [Val])]
+records bs = [(toEnum c, vs) | NRec c vs <- bs]
+blocks  :: (Enum a) => [NBitCode] -> [(a,[NBitCode])]
+blocks bs = [(toEnum c, bs') | NBlock c bs' <- bs]
+
+lookupBlock :: (Enum a) => a -> [NBitCode] -> Maybe [NBitCode]
+lookupBlock e bs = lookup (fromEnum e) [(c,b) | NBlock c b <- bs]
+
+lookupRecord :: (Enum a) => a -> [NBitCode] -> Maybe [Val]
+lookupRecord e bs = lookup (fromEnum e) [(c,v) | NRec c v <- bs]

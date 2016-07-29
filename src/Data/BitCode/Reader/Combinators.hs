@@ -4,6 +4,8 @@ import Prelude hiding (read)
 import Data.Word (Word8, Word32)
 import Data.Bits (FiniteBits, setBit, zeroBits, shift, (.|.))
 
+import Control.Applicative ((<|>))
+
 import Data.BitCode
 import Data.BitCode.Reader.Monad
 
@@ -11,7 +13,7 @@ parseBytes :: [Word8] -> BitCodeReader ()
 parseBytes ws = do
   bits' <- read len
   if bits == bits' then return ()
-    else fail "no parse"
+    else fail $ "not enough bits. Trying to read " ++ (show ws) ++ " but only got " ++ (show $ length bits') ++ " bits."
   where bits :: Bits
         bits = concatMap fromByte ws
         len  = length bits
@@ -59,3 +61,6 @@ parseHeader = do
 
 parseLLVMIRHeader :: BitCodeReader ()
 parseLLVMIRHeader = parseBytes [0x42,0x43,0xc0,0xde]
+
+optional :: BitCodeReader a -> BitCodeReader (Maybe a)
+optional p = (Just <$> p) <|> pure Nothing
