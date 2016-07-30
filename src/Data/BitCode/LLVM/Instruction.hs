@@ -1,11 +1,11 @@
 module Data.BitCode.LLVM.Instruction where
 
-import Data.Word               (Word64)
+import Data.BitCode.LLVM.Types
+import Data.BitCode.LLVM.Classes.ToSymbols
 
 import Data.BitCode.LLVM.Type  (Ty(Ptr))
 import Data.BitCode.LLVM.Value (Symbol)
 import Data.BitCode.LLVM.Cmp   (Predicate)
-type Align = Word64
 
 
 data Inst
@@ -29,10 +29,23 @@ data Inst
   -- | Return Terminator
   | Ret (Maybe Symbol)
   -- | Unconditional branch
-  | UBr Word64
+  | UBr BasicBlockId
   -- | Conditional branch
-  | Br Symbol Word64 Word64
-  deriving Show
+  | Br Symbol BasicBlockId BasicBlockId
+  deriving (Show, Eq)
+
+instance ToSymbols Inst where
+  symbols (Alloca _ s _) = [s]
+  symbols (Load _ s _)   = [s]
+  symbols (Store s s' _) = [s,s']
+  symbols (Call _ s ss)  = s:ss
+  symbols (Cmp2 _ s s' _)= [s,s']
+  symbols (Gep _ _ s ss) = s:ss
+  symbols (Ret (Just s)) = [s]
+  symbols (Ret Nothing)  = []
+  symbols (UBr _)        = []
+  symbols (Br s _ _)     = [s]
+
 
 instTy :: Inst -> Maybe Ty
 instTy (Alloca t _ _) = Just t

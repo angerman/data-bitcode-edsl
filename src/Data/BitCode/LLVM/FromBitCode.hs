@@ -304,7 +304,7 @@ parseModule bs = do
   let functionDefs = [f | f@(Named _ (V.Function {..})) <- values, not fIsProto]
       functionDecl = [f | f@(Named _ (V.Function {..})) <- values, fIsProto ]
   (unless (length functionDefs == length functionBlocks)) $ fail $ "#functionDecls (" ++ show (length functionDefs) ++ ") does not match #functionBodies (" ++ show (length functionBlocks) ++ ")"
-  
+
   fns <- mapM parseFunction (zip functionDefs functionBlocks)
 
   return $ Module version triple layout values functionDecl fns

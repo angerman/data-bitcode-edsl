@@ -11,6 +11,8 @@ import Data.BitCode.LLVM.Codes.Identification (Epoch)
 import qualified Data.BitCode.LLVM.Instruction as I
 import qualified Data.BitCode.LLVM.Value as V
 
+import Data.BitCode.LLVM.Classes.ToSymbols
+
 import Data.Word (Word64)
 
 --- LLVM Bit Codes -------------------------------------------------------------
@@ -41,11 +43,15 @@ data Module = Module
   { mVersion :: Word64         -- ^ Encoding version: 0 absolute indices, 1 relative indices.
   , mTriple :: Maybe String    -- ^ Optional triple: usually <arch>-<vendor>-<os>
   , mDatalayout :: Maybe String-- ^ Optional data layout string.
-  , mValues :: [Symbol]         -- ^ Globals.
-  , mDecls :: [Symbol]          -- ^ Function declarations for functions outside of the module.
+  , mValues :: [Symbol]        -- ^ Globals. (Global values and constants.)
+  , mDecls :: [Symbol]         -- ^ Function declarations for functions outside of the module.
   , mFns :: [Function]         -- ^ Function definitions for function contained within the module.
   }
-  deriving Show
+  deriving (Show,Eq)
+
+instance ToSymbols Module where
+  symbols (Module{..}) = mValues ++ mDecls ++ concatMap symbols mFns
+
 
 class HasType a where
   ty :: a -> Ty

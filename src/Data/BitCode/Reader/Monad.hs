@@ -106,10 +106,10 @@ read n = BitCode $ \(BitC w b bs g) -> let !h = take n bs
 ask :: BitCodeReader (Int, Int)
 ask = BitCode $ \b@(BitC ws bs _ _) -> PairS (pure (ws,bs)) b
 
-askGlobalAbbrevs :: BlockID -> BitCodeReader AbbrevMap
+askGlobalAbbrevs :: BlockId -> BitCodeReader AbbrevMap
 askGlobalAbbrevs blockId = BitCode $ \b@(BitC _ _ _ g) -> PairS (pure $ lookupGlobalAbbrev g blockId) b
 
-tellGlobalAbbrev :: BlockID -> BitCode -> BitCodeReader ()
+tellGlobalAbbrev :: BlockId -> BitCode -> BitCodeReader ()
 tellGlobalAbbrev blockId abbrev = BitCode $ \b@(BitC _ _ _ g) -> PairS (pure ()) b { _gabbrevs = addGlobalAbbrev g blockId abbrev }
 -- * Reading from a file
 

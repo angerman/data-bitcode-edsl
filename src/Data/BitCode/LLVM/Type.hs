@@ -21,4 +21,13 @@ data Ty
   | StructNamed { teNamedIsPacked :: Bool, teNamedEltTy :: [Ty] }
   | Function { teVarArg :: Bool, teRetTy :: Ty, teParamTy :: [Ty] }
   | Token
-  deriving (Show)
+  deriving (Show, Eq, Ord)
+
+subTypes :: Ty -> [Ty]
+subTypes (Ptr _ t) = t:subTypes t
+subTypes (Array _ t) = t:subTypes t
+subTypes (Vector _ t) = t:subTypes t
+subTypes (StructAnon _ ts) = concatMap (\t -> t:subTypes t) ts
+subTypes (StructNamed _ ts) = concatMap (\t -> t:subTypes t) ts
+subTypes (Function _ r pt) = concatMap (\t -> t:subTypes t) (r:pt)
+subTypes _ = []

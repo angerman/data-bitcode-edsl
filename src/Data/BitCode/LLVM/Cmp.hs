@@ -37,7 +37,7 @@ data Predicate
   | ICMP_SGE  -- = 39,  ///< signed greater or equal
   | ICMP_SLT  -- = 40,  ///< signed less than
   | ICMP_SLE  --  = 41,  ///< signed less or equal
-  deriving (Enum, Show)
+  deriving (Eq, Enum, Show)
   --  FIRST_ICMP_PREDICATE = ICMP_EQ,
   --  LAST_ICMP_PREDICATE = ICMP_SLE,
   --  BAD_ICMP_PREDICATE = ICMP_SLE + 1

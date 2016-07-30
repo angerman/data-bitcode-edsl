@@ -10,7 +10,7 @@ import Data.BitCode
 import Data.Maybe (fromMaybe)
 
 newtype AbbrevMap = AbbrevMap [(Code, BitCode)] deriving Show
-newtype GlobalAbbrevMap = GlobalAbbrevMap [(BlockID, AbbrevMap)] deriving Show
+newtype GlobalAbbrevMap = GlobalAbbrevMap [(BlockId, AbbrevMap)] deriving Show
 
 instance Monoid AbbrevMap where
   mempty = AbbrevMap []
@@ -20,13 +20,13 @@ instance Monoid GlobalAbbrevMap where
   mempty = GlobalAbbrevMap []
   (GlobalAbbrevMap m) `mappend` (GlobalAbbrevMap n) = GlobalAbbrevMap (m ++ n)
 
-lookupGlobalAbbrev :: GlobalAbbrevMap -> BlockID -> AbbrevMap
+lookupGlobalAbbrev :: GlobalAbbrevMap -> BlockId -> AbbrevMap
 lookupGlobalAbbrev (GlobalAbbrevMap g) blockId = fromMaybe mempty (lookup blockId g)
 
-addGlobalAbbrev :: GlobalAbbrevMap -> BlockID -> BitCode -> GlobalAbbrevMap
+addGlobalAbbrev :: GlobalAbbrevMap -> BlockId -> BitCode -> GlobalAbbrevMap
 addGlobalAbbrev (GlobalAbbrevMap g) blockId block = GlobalAbbrevMap g'
   where g' = go g blockId block
-        go :: [(BlockID, AbbrevMap)] -> BlockID -> BitCode -> [(BlockID, AbbrevMap)]
+        go :: [(BlockId, AbbrevMap)] -> BlockId -> BitCode -> [(BlockId, AbbrevMap)]
         go [] id b = [(blockId, addAbbrev mempty block)]
         go (gb@(id', bs):g') id block | id == id' = (id, addAbbrev bs block):go g' id block
                                       | otherwise = gb:go g' id block

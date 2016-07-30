@@ -3,7 +3,7 @@ module Data.BitCode.LLVM.Codes.Constants where
 -- | The constants block (CONSTANTS_BLOCK_ID) describes emission for each
 -- constant and maintains an implicit current type value.
 data Constant
-  = CTS_CODE_UNUSED0 -- 0
+  = CST_CODE_UNUSED0 -- 0
   -- | SETTYPE:       [typeid]
   | CST_CODE_SETTYPE -- 1
   -- | NULL

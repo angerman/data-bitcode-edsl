@@ -24,4 +24,4 @@ data Linkage
   | ExternalWeak -- 9
   -- | Tentative definitions.
   | Common -- 10
-  deriving (Enum, Show)
+  deriving (Enum, Eq, Show)

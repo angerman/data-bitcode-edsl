@@ -7,4 +7,4 @@ data ThreadLocalMode
   | LocalDynamicTLSModel
   | InitialExecTLSModel
   | LocalExecTLSModel
-  deriving (Enum, Show)
+  deriving (Eq, Enum, Show)
