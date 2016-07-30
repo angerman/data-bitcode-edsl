@@ -17,6 +17,11 @@ import Data.BitCode.LLVM.Classes.ToSymbols
 import Data.List (elemIndex, sort, sortOn, groupBy, nub)
 import Data.Function (on)
 
+import Data.Maybe (fromMaybe)
+import Data.Word  (Word64)
+
+import Data.Bits ((.|.), shift)
+
 --------------------------------------------------------------------------------
 -- Turn things into NBitCode.
 --
@@ -73,6 +78,8 @@ instance ToNBitCode Module where
       [ mkRec MC.TRIPLE t | Just t <- [mTriple] ] ++
       [ mkRec MC.DATALAYOUT dl | Just dl <- [mDatalayout] ] ++
       [ mkBlock CONSTANTS $ mkConstRecs constants ] ++
+      map mkGlobalRec globals ++
+      map mkFunctionRec functions ++
       []
     -- = pure $ mkBlock MODULE [ {- Record: Version 1 -}
     --                         , {- Block: ParamAttrGroup 10 -}
@@ -92,7 +99,7 @@ instance ToNBitCode Module where
       -- globals
       globals = [g | g@(Global{}) <- map symbolValue mValues]
       -- functions
-      functions = [f | f@(Global{}) <- map symbolValue mValues]
+      functions = [f | f@(V.Function{}) <- map symbolValue mValues]
       -- TODO: aliases??
       -- constants
       constants = sortOn cTy [c | c@(Constant{}) <- map symbolValue mValues]
@@ -120,6 +127,46 @@ instance ToNBitCode Module where
       -- XXX BinOp, Cast, Gep, Select, ExtractElt, InsertElt, ShuffleVec, Cmp, InlineAsm, ShuffleVecEx,
       mkConstRec (InboundsGep t symbls) = mkRec CC.CST_CODE_CE_INBOUNDS_GEP ((lookupIndex allTypes t :: Int):map (lookupIndex constants . symbolValue) symbls)
       -- XXX BlockAddress, Data, InlineAsm
+
+      bool :: (Integral a) => Bool -> a
+      bool x = if x then 1 else 0
+
+      fromEnum' :: (Enum a, Integral b) => a -> b
+      fromEnum' = fromIntegral . fromEnum
+
+      mkGlobalRec :: Value -> NBitCode
+      mkGlobalRec (Global{..}) = mkRec MC.GLOBALVAR [ lookupIndex allTypes gPointerType
+                                                    , 1 .|. shift (bool gIsConst) 1 .|. shift gAddressSpace 2
+                                                    , fromMaybe 0 ((+1) . lookupIndex constants <$> gInit)
+                                                    , fromEnum' gLinkage
+                                                    , gParamAttrs
+                                                    , gSection
+                                                    , fromEnum' gVisibility
+                                                    , fromEnum' gThreadLocal
+                                                    , bool gUnnamedAddr
+                                                    , bool gExternallyInitialized
+                                                    , fromEnum' gDLLStorageClass
+                                                    , gComdat
+                                                    ]
+
+      mkFunctionRec :: Value -> NBitCode
+      mkFunctionRec (V.Function{..}) = mkRec MC.FUNCTION [ lookupIndex allTypes fType
+                                                         , fromEnum' fCallingConv
+                                                         , bool fIsProto
+                                                         , fromEnum' fLinkage
+                                                         , fParamAttrs
+                                                         , fAlignment
+                                                         , fSection
+                                                         , fromEnum' fVisibility
+                                                         , fGC
+                                                         , bool fUnnamedAddr
+                                                         , fPrologueData
+                                                         , fromEnum' fDLLStorageClass
+                                                         , fComdat
+                                                         , fPrefixData
+                                                         , fPersonalityFn
+                                                         ]
+
 
 -- X = [NBlock 13 [NRec 1 [65,80,80,76,69,95,49,95,55,48,51,46,48,46,51,49,95,48],NRec 2 [0]]
 --     ,NBlock 8

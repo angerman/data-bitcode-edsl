@@ -88,4 +88,3 @@ testToBitCodeFromFile :: FilePath -> IO [BitCode]
 testToBitCodeFromFile f = testParse f >>= \case
   Left err -> fail err
   Right (_, m) -> return $ map denormalize $ toBitCode m
-

@@ -45,10 +45,10 @@ Pure haskell support for reading and writing the BitCode Container Format.
   - [x] Build basic ToBitCode Class that turns stuff into NBitCode
   - [x] Build denormalize :: NBitCode -> BitCode
   - [x] Test write pipeline (e.g. produce a .bc file from a ToBitCode a)
-  - [ ] Collect Types and put them into a type table
-  - [ ] Build Values
-    - [ ] Build Global (Global Value, Functions, External Functions) Records
-    - [ ] Build Constants block. (Group by Type)
+  - [x] Collect Types and put them into a type table
+  - [x] Build Values
+    - [x] Build Global (Global Value, Functions, External Functions) Records
+    - [x] Build Constants block. (Group by Type)
   - [ ] Generate Function Blocks
     - [ ] Lookup Type Idx's and replace types with their references.
     - [ ] Lookup Value Idx's and replace them with their references.
