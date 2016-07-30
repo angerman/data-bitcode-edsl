@@ -252,7 +252,9 @@ parseGlobalVar
   -- TODO: isConst has bit 0 set if const. bit 1 if explicit type. We only handle explicit type so far.
   unless (testBit isConst 1) $ fail "non-explicit type global vars are not (yet) supported"
   let addressSpace = shift isConst (-2)
-  tellValue $ Global ty (isConst /= 0) addressSpace (if initId /= 0 then Just (initId - 1) else Nothing)
+  let initVal = if initId /= 0 then Just (FwdRef (initId - 1)) else Nothing
+
+  tellValue $ Global ty (isConst /= 0) addressSpace initVal
                      (toEnum' linkage) paramAttrId section (toEnum' visibility) (toEnum' threadLocalMode)
                      (unnamedAddr /= 0) (externallyInitialized /= 0) (toEnum' storageClass) comdat
 
@@ -284,6 +286,21 @@ parseTopLevel bs = do
   mod <- parseModule moduleBlock
   return (ident, mod)
 
+resolveFwdRefs :: [Symbol] -> [Symbol]
+resolveFwdRefs s = map (fmap' resolveFwdRef') s
+  where
+    -- TODO: Maybe Symbol should be more generic? Symbol a,
+    --       then we could have Functor Symbol.
+    fmap' :: (Value -> Value) -> Symbol -> Symbol
+    fmap' f (Named s v) = Named s (f v)
+    fmap' f (Unnamed v) = Unnamed (f v)
+    resolveFwdRef' :: Value -> Value
+    resolveFwdRef' g@(Global{..}) = case gInit of
+      Just (FwdRef id) -> g { gInit = Just $ symbolValue (s !! (fromIntegral id)) }
+      _                -> g
+    -- resolve fws refs only for globals for now.
+    resolveFwdRef' x = x
+
 -- | Parse a module from a set of blocks (the body of the module)
 parseModule :: [NBitCode] -> LLVMReader Module
 parseModule bs = do
@@ -291,6 +308,7 @@ parseModule bs = do
       triple  = parseTriple           <$> lookupRecord TRIPLE bs
       layout  = parseDataLayout       <$> lookupRecord DATALAYOUT bs
       Just vst= parseSymbolValueTable <$> lookupBlock VALUE_SYMTAB bs
+
   flip mapM_  bs $ \case
     (NBlock c bs') -> parseModuleBlock (toEnum c, bs')
     (NRec   c vs)  -> parseModuleRecord (toEnum c, vs)
@@ -298,6 +316,9 @@ parseModule bs = do
   -- update values with symbols
   tellValueSymbolTable vst
 
+  -- update forward references
+  resolveFwdRefs <$> askValueList >>= tellValueList
+  
   -- obtain a snapshot of all current values
   values <- askValueList
 
@@ -399,7 +420,7 @@ parseFunction (f@(Named _ V.Function{..}), b) = do
     Just vst -> tellValueSymbolTable vst
     Nothing -> pure ()
 
-  consts <- drop nVals' <$> askValueList
+  consts <- drop nVals' . resolveFwdRefs <$> askValueList
   -- parse the instructions
   -- the first basic block is going to be empty. As the body
   -- has to finish with a terminator, which adds a final empty

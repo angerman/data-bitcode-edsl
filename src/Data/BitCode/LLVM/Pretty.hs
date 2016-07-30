@@ -34,15 +34,17 @@ prefix (Constant{}) = text "const "
 prefix (Arg{}) = text "arg "
 prefix (Value{}) = text "val "
 prefix (TRef{}) = text "ref "
+prefix (FwdRef i) = text "fwdRef" <+> int (fromIntegral i)
 
 suffix :: Value -> Doc
-suffix (Global{..}) = text "::" <+> pretty (Ptr 0 gPointerType)
+suffix (Global{..}) = parens (pretty gInit) <+> text "::" <+> pretty (Ptr 0 gPointerType)
 suffix (V.Function{..}) = text "::" <+> pretty (Ptr 0 fType)
 suffix (Alias{..}) = empty
 suffix (Constant t c) = pretty c <+> text "::" <+> pretty t
 suffix (Arg t) = text "::" <+> pretty t
 suffix (Value t) = text "::" <+> pretty t
 suffix (TRef t r) = int r <+> text "::" <+> pretty t
+suffix (FwdRef i) = empty
 
 -- * Values
 instance Pretty Value where
