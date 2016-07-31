@@ -25,7 +25,7 @@ import Data.Function (on)
 import Data.Maybe (fromMaybe, catMaybes)
 import Data.Word  (Word64)
 
-import Data.Bits ((.|.), shift, setBit)
+import Data.Bits (FiniteBits, (.|.), shift, setBit)
 
 import Debug.Trace
 
@@ -94,8 +94,14 @@ instance ToNBitCode (Maybe Ident, Module) where
     = concat [ identBlock,
                pure . mkBlock MODULE $
                  moduleHeader ++
-                 map mkFunctionBlock mFns ++
+                 -- TODO: To support the OffsetLogic in 3.8 and later
+                 --       we would replace the mkSynTabBlock with the VST Fwd Ref.
+                 --       and put the mkSymTabBlock at the end (behind the mkFunctionBlock's.)
+                 --       We would need to be able to figure out the bitcode positions though.
+                 -- NOTE: An initial attempt at that (see nBitCodeLength below), is missing
+                 --       some vital ingredent.  See also the CODE_FNENTRY generation.
                  [ mkSymTabBlock (constantSymbols ++ globalSymbols ++ functionSymbols) ] ++
+                 map mkFunctionBlock mFns ++
                  []
       ]
     -- = pure $ mkBlock MODULE [ {- Record: Version 1 -}
@@ -155,8 +161,8 @@ instance ToNBitCode (Maybe Ident, Module) where
       mkConstRec :: [V.Value] -> V.Const -> NBitCode
       mkConstRec constants V.Null = mkEmptyRec CC.CST_CODE_NULL
       mkConstRec constants V.Undef = mkEmptyRec CC.CST_CODE_UNDEF
-      mkConstRec constants (V.Int n) = mkRec CC.CST_CODE_INTEGER n
-      mkConstRec constants (V.WideInt ns) = mkRec CC.CST_CODE_WIDE_INTEGER ns
+      mkConstRec constants (V.Int n) = mkRec CC.CST_CODE_INTEGER (fromSigned n)
+      mkConstRec constants (V.WideInt ns) = mkRec CC.CST_CODE_WIDE_INTEGER (map fromSigned ns)
       -- TODO: Float encoding?
 --      mkConstRec constants (Float f) = mkRect CC.CST_CODE_FLOAT f
       -- TODO: Support aggregates (lookup value numbers in Constants? + Globals + Functions?)
@@ -168,6 +174,12 @@ instance ToNBitCode (Maybe Ident, Module) where
         = mkRec CC.CST_CODE_CE_INBOUNDS_GEP $
           (lookupIndex allTypes t :: Int):zip' (map (lookupIndex allTypes . ty . V.symbolValue) symbls)
                                                (map (lookupIndex constants . V.symbolValue) symbls)
+
+      -- signedness encoding.
+      -- see `toSigned` in FromBitCode.
+      fromSigned :: (FiniteBits a, Ord a, Num a) => a -> a
+      fromSigned v | v < 0 = 1 .|. shift (-v) 1
+                   | otherwise = shift v 1
       -- XXX BlockAddress, Data, InlineAsm
       zip' :: [a] -> [a] -> [a]
       zip' [] [] = []
@@ -228,7 +240,8 @@ instance ToNBitCode (Maybe Ident, Module) where
                                                     --          offset corret.
                                                     -- XXX: VST OFFSETS
                                                     | otherwise = Just (mkRec VST.VST_CODE_ENTRY (n:map fromEnum nm))
-                where offset = fst . nBitCodeLength $ identBlock ++ [ mkBlock MODULE $ moduleHeader ]
+                                                                  -- Just (mkRec VST.VST_CODE_FNENTRY (n:offset-1:map fromEnum nm))
+                where offset = fst . nBitCodeLength $ [ mkBlock MODULE $ moduleHeader ]
               -- XXX: this is ok here, as anything else can just be named constants/globals.
               --      We simply can not encounter blocks just yet.
               mkSymTabRec (n, nm, _)                            = Just (mkRec VST.VST_CODE_ENTRY (n:map fromEnum nm))
@@ -299,8 +312,8 @@ instance ToNBitCode (Maybe Ident, Module) where
                                                                             , explicitTypeMask .|. bitWidth a
                                                                             ]
               -- TODO: Support Volatile flag
-              mkInstRec n (I.Load _ s a) = mkRec FC.FUNC_CODE_INST_LOAD [ lookupIndex allVals (V.symbolValue s)
-                                                                        , lookupIndex allTypes . ty . V.symbolValue $ s
+              mkInstRec n (I.Load _ s a) = mkRec FC.FUNC_CODE_INST_LOAD [ lookupRelativeSymbolIndex' n s
+                                                                        , lookupIndex allTypes . T.tePointeeTy . ty . V.symbolValue $ s
                                                                         , bitWidth a
                                                                         , 0
                                                                         ]
@@ -339,7 +352,7 @@ instance ToNBitCode (Maybe Ident, Module) where
               mkInstRec n (I.Ret Nothing)    = mkEmptyRec FC.FUNC_CODE_INST_RET
               mkInstRec n (I.UBr bbId)       = mkRec FC.FUNC_CODE_INST_BR [bbId]
               mkInstRec n (I.Br val bbId bbId') = mkRec FC.FUNC_CODE_INST_BR [ bbId
-                                                                             , bbId
+                                                                             , bbId'
                                                                              , lookupRelativeSymbolIndex' n val
                                                                              ]
               mkInstRec n i = error $ "Instruction " ++ (show i) ++ " not yet supported."
