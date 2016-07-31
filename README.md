@@ -41,7 +41,7 @@ Pure haskell support for reading and writing the BitCode Container Format.
   - [ ] Add Metadata to Module
   - [ ] Add Attributes to Module
   - [x] !Replace the initId value the corresponding symbol in Global
-- [ ] LLVMWriter
+- [x] LLVMWriter
   - [x] Build basic ToBitCode Class that turns stuff into NBitCode
   - [x] Build denormalize :: NBitCode -> BitCode
   - [x] Test write pipeline (e.g. produce a .bc file from a ToBitCode a)
@@ -49,6 +49,19 @@ Pure haskell support for reading and writing the BitCode Container Format.
   - [x] Build Values
     - [x] Build Global (Global Value, Functions, External Functions) Records
     - [x] Build Constants block. (Group by Type)
-  - [ ] Generate Function Blocks
-    - [ ] Lookup Type Idx's and replace types with their references.
-    - [ ] Lookup Value Idx's and replace them with their references.
+  - [x] Generate Function Blocks
+    - [x] Lookup Type Idx's and replace types with their references.
+    - [x] Lookup Value Idx's and replace them with their references.
+  - [x] Build VSTs (necessary to properly be able to link external functions.)
+
+* Medium Prio:
+- [ ] Rename `XXX_CODE_YYY` into `YYY`, they usually live in the corresponding module anyway.
+- [ ] Drop the Call Markers file and unify with BitFlags (including inAllocaMask, SwiftErrorMask, ...)
+
+* Low Prio:
+- [ ] Writer: Add support for VST Offsets to the writer (since 3.8).
+      (Not sure if this will be mandatory in the future).
+      See: https://reviews.llvm.org/D12536
+      The linked document: https://drive.google.com/file/d/0B036uwnWM6RWdnBLakxmeDdOeXc/view describes
+      the reasoning. We likely does *not* support ThinLTO without this.
+- [ ] Writer: Support BasicBlock Labels (`VST_CODE_BBENTRY`)

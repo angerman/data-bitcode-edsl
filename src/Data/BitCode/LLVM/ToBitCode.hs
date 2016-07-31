@@ -5,7 +5,7 @@ module Data.BitCode.LLVM.ToBitCode where
 import Data.BitCode (NBitCode, mkBlock, mkRec, mkEmptyRec, bitWidth)
 import Data.BitCode.LLVM
 import Data.BitCode.LLVM.Function
-import qualified Data.BitCode.LLVM.Value as V (Const(..), Value(..), Symbol, symbolValue)
+import qualified Data.BitCode.LLVM.Value as V (Const(..), Value(..), Symbol(..), symbolValue)
 import qualified Data.BitCode.LLVM.Type  as T (Ty(..), subTypes)
 import qualified Data.BitCode.LLVM.Instruction as I (Inst(..), instTy)
 import Data.BitCode.LLVM.Flags.CallMarkers
@@ -16,17 +16,23 @@ import qualified Data.BitCode.LLVM.Codes.Module         as MC
 import qualified Data.BitCode.LLVM.Codes.Type           as TC
 import qualified Data.BitCode.LLVM.Codes.Constants      as CC
 import qualified Data.BitCode.LLVM.Codes.Function       as FC
+import qualified Data.BitCode.LLVM.Codes.ValueSymtab    as VST
 
 import Data.BitCode.LLVM.Classes.ToSymbols
 import Data.List (elemIndex, sort, sortOn, groupBy, nub)
 import Data.Function (on)
 
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, catMaybes)
 import Data.Word  (Word64)
 
 import Data.Bits ((.|.), shift, setBit)
 
 import Debug.Trace
+
+-- to compute the length of emitted bitcode.
+import Data.BitCode (denormalize)
+import Data.BitCode.Writer (emitTopLevel)
+import Data.BitCode.Writer.Monad (evalBitCodeWriter, ask)
 
 --------------------------------------------------------------------------------
 -- Turn things into NBitCode.
@@ -40,6 +46,10 @@ instance ToNBitCode Ident where
     = pure $ mkBlock IDENTIFICATION [ mkRec IC.STRING name
                                     , mkRec IC.EPOCH epoch
                                     ]
+
+instance (ToNBitCode a) => ToNBitCode (Maybe a) where
+  toBitCode (Just a) = toBitCode a
+  toBitCode Nothing  = []
 
 instance (ToNBitCode a) => ToNBitCode [a] where
   toBitCode = concatMap toBitCode
@@ -76,18 +86,18 @@ lookupIndex xs x = case elemIndex x xs of
   Nothing -> error $ "Unable to find " ++ show x ++ " in " ++ show xs
 
 
-instance ToNBitCode Module where
-  toBitCode m@(Module{..})
-    = pure . mkBlock MODULE $
-      [ mkRec MC.VERSION [mVersion] ] ++
-      toBitCode allTypes ++
-      [ mkRec MC.TRIPLE t | Just t <- [mTriple] ] ++
-      [ mkRec MC.DATALAYOUT dl | Just dl <- [mDatalayout] ] ++
-      mkConstBlock constants constants ++
-      map mkGlobalRec globals ++
-      map mkFunctionRec functions ++
-      map mkFunctionBlock mFns ++
-      []
+-- We *can not* have ToNBitCode Module, as we
+-- need to know the position in the bitcode stream.
+-- And this includes the Indetification :(
+instance ToNBitCode (Maybe Ident, Module) where
+  toBitCode (i, m@(Module{..}))
+    = concat [ identBlock,
+               pure . mkBlock MODULE $
+                 moduleHeader ++
+                 map mkFunctionBlock mFns ++
+                 [ mkSymTabBlock (constantSymbols ++ globalSymbols ++ functionSymbols) ] ++
+                 []
+      ]
     -- = pure $ mkBlock MODULE [ {- Record: Version 1 -}
     --                         , {- Block: ParamAttrGroup 10 -}
     --                         , {- Block: ParamAttr 9 -}
@@ -103,13 +113,32 @@ instance ToNBitCode Module where
     --                         , {- Block: SymTab 14 -}
     --                         ]
     where
+      --------------------------------------------------------------------------
+      -- Compute the offsets
+      identBlock   = toBitCode i
+      moduleHeader = [ mkRec MC.VERSION [mVersion] ] ++
+                     toBitCode allTypes ++
+                     [ mkRec MC.TRIPLE t | Just t <- [mTriple] ] ++
+                     [ mkRec MC.DATALAYOUT dl | Just dl <- [mDatalayout] ] ++
+                     [ mkConstBlock constants constants ] ++
+                     map mkGlobalRec globals ++
+                     map mkFunctionRec functions
+      nBitCodeLength :: [NBitCode] -> (Int,Int)
+      nBitCodeLength nbc = evalBitCodeWriter $ (emitTopLevel . map denormalize $ nbc) >> ask
+      --------------------------------------------------------------------------
       -- globals
-      globals = [g | g@(V.Global{}) <- map V.symbolValue mValues]
+      globalSymbols = [ g | g@(V.Named _ (V.Global{})) <- mValues] ++
+                      [ g | g@(V.Unnamed (V.Global{})) <- mValues]
+      globals = map V.symbolValue globalSymbols
       -- functions
-      functions = [f | f@(V.Function{}) <- map V.symbolValue mValues]
+      functionSymbols = [ f | f@(V.Named _ (V.Function{})) <- mValues] ++
+                        [ f | f@(V.Unnamed (V.Function{})) <- mValues]
+      functions = map V.symbolValue functionSymbols
       -- TODO: aliases??
       -- constants
-      constants = sortOn V.cTy [c | c@(V.Constant{}) <- map V.symbolValue mValues]
+      constantSymbols = sortOn (V.cTy . V.symbolValue) $ [ c | c@(V.Named _ (V.Constant{})) <- mValues] ++
+                                                         [ c | c@(V.Unnamed (V.Constant{})) <- mValues]
+      constants = map V.symbolValue constantSymbols
       -- The types used in the module.
       topLevelTypes = nub . sort . map ty . symbols $ m
       -- all types contains all types including those that types reference. (e.g. i8** -> i8**, i8*, and i8)
@@ -119,8 +148,8 @@ instance ToNBitCode Module where
       -- | Turn a set of Constant Values unto BitCode Records.
       mkConstBlock :: [V.Value] -- ^ values that can be referenced.
                    -> [V.Value] -- ^ the constants to turn into BitCode
-                   -> [NBitCode]
-      mkConstBlock values consts = pure . mkBlock CONSTANTS $ concatMap f (groupBy ((==) `on` V.cTy) consts)
+                   -> NBitCode
+      mkConstBlock values consts = mkBlock CONSTANTS $ concatMap f (groupBy ((==) `on` V.cTy) consts)
         where f [] = []
               f ((V.Constant t c):cs) = (mkRec CC.CST_CODE_SETTYPE (lookupIndex allTypes t :: Int)):mkConstRec values c:map (mkConstRec values . V.cConst) cs
       mkConstRec :: [V.Value] -> V.Const -> NBitCode
@@ -185,17 +214,38 @@ instance ToNBitCode Module where
                                                          ]
                                        where (T.Ptr _ t) = fType
 
+      --------------------------------------------------------------------------
+      -- VALUE SYMBOL TABLE
+      --
+      mkSymTabBlock :: [V.Symbol] -> NBitCode
+      -- TODO: drop `catMaybes`, once we support all symbols (FNENTRY, BBENTRY)
+      mkSymTabBlock syms = mkBlock VALUE_SYMTAB (catMaybes (map mkSymTabRec namedIdxdSyms))
+        where namedIdxdSyms = [(idx, name, value) | (idx, (V.Named name value)) <- zip [0..] syms]
+              mkSymTabRec :: (Int, String, V.Value) -> Maybe NBitCode
+              mkSymTabRec (n, nm, (V.Function{..})) | fIsProto  = Just (mkRec VST.VST_CODE_ENTRY (n:map fromEnum nm))
+                                                    -- LLVM 3.8 comes with FNENTRY, which has offset at the
+                                                    --          second position. This however requires computing the
+                                                    --          offset corret.
+                                                    -- XXX: VST OFFSETS
+                                                    | otherwise = Just (mkRec VST.VST_CODE_ENTRY (n:map fromEnum nm))
+                where offset = fst . nBitCodeLength $ identBlock ++ [ mkBlock MODULE $ moduleHeader ]
+              -- XXX: this is ok here, as anything else can just be named constants/globals.
+              --      We simply can not encounter blocks just yet.
+              mkSymTabRec (n, nm, _)                            = Just (mkRec VST.VST_CODE_ENTRY (n:map fromEnum nm))
+      --------------------------------------------------------------------------
+      -- FUNCTIONS (BasicBlocks)
+      --
       mkFunctionBlock :: Function -> NBitCode
       {- Declare blocks, constants, instructions, vst -}
       mkFunctionBlock (Function sig consts bbs)
         = mkBlock FUNCTION $
           [ mkRec FC.FUNC_CODE_DECLAREBLOCKS (length bbs) ] ++
-          mkConstBlock bodyVals fconstants ++
+          [ mkConstBlock bodyVals fconstants ] ++
           -- this is a *bit* ugly.
           -- We use a fold to carry the instruction count through
           -- the record creation. We also prepend records and hence
           -- have to reverse them in the end.
-          -- TODO: Use better appendable DataStructure.
+          -- TODO: Use better mappendable DataStructure.
           (reverse . snd $ foldl mkInstRecFold (0,[]) (concatMap blockInstructions bbs))
         where -- function arguments
               fArgTys = T.teParamTy (T.tePointeeTy (V.fType (V.symbolValue sig)))

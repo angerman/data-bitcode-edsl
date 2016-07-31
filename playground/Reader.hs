@@ -74,9 +74,8 @@ testToSymbols f = testParse f >>= \case
                   in return $ nub . sort $ ts ++ concatMap subTypes ts
 
 testToNBitCode :: [NBitCode]
-testToNBitCode = concat [toBitCode (Ident "TinyBitCode" Current)
-                        ,toBitCode (Module 1 Nothing Nothing [] [] [])
-                        ]
+testToNBitCode = toBitCode (Just (Ident "TinyBitCode" Current),
+                            (Module 1 Nothing Nothing [] [] []))
 
 testToBitCode :: [BitCode]
 testToBitCode = map denormalize $ testToNBitCode
@@ -87,4 +86,4 @@ testWriteNBitCode = writeFile' "data/out.bc" testToBitCode
 testToBitCodeFromFile :: FilePath -> IO [BitCode]
 testToBitCodeFromFile f = testParse f >>= \case
   Left err -> fail err
-  Right (_, m) -> return $ map denormalize $ toBitCode m
+  Right (i, m) -> return $ map denormalize $ toBitCode (i, m)
