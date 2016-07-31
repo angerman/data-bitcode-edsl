@@ -11,12 +11,12 @@ import Data.BitCode.LLVM.Cmp   (Predicate)
 data Inst
   -- | Ty and Value type should match up. If Ty is Metadata, then the Value is takes from the Metadata List
   -- else from the value list.
-  = Alloca Ty Symbol Align -- this would produce a typed ref. Ref
+  = Alloca Ty Symbol Align  -- this would produce a typed ref. Ref, Alignment of 0 means, the backend can choose an appropriate alignment.
   -- | Load instruction
   | Load Ty Symbol Align
   -- | Store instruction. Store the Value in the Typed Ref.
   | Store Symbol Symbol Align
-  -- | Call instruction. (Ty :: Ty, Fn :: Value, args :: [Value])
+  -- | Call instruction. (Ty :: Ty, Fn :: Symbol, args :: [Symbol])
   | Call Ty Symbol [Symbol]
   -- | Compare
   | Cmp2 Ty Symbol Symbol Predicate

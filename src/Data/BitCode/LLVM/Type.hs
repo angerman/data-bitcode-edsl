@@ -21,7 +21,47 @@ data Ty
   | StructNamed { teNamedIsPacked :: Bool, teNamedEltTy :: [Ty] }
   | Function { teVarArg :: Bool, teRetTy :: Ty, teParamTy :: [Ty] }
   | Token
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq)
+
+orderIdx :: Ty -> Int
+orderIdx (NumEntry{}) = 0
+orderIdx Void         = 1
+orderIdx Float        = 2
+orderIdx Double       = 3
+orderIdx Label        = 4
+orderIdx Opaque       = 5
+orderIdx (Int{})      = 6
+orderIdx (Ptr{})      = 7
+orderIdx Half         = 8
+orderIdx (Array{})    = 9
+orderIdx (Vector{})   = 10
+orderIdx X86Fp80      = 11
+orderIdx Fp128        = 12
+orderIdx Metadata     = 13
+orderIdx X86Mmx       = 14
+orderIdx StructAnon{} = 15
+orderIdx StructName{} = 16
+orderIdx StructNamed{}= 17
+orderIdx Function{}   = 18
+orderIdx Token        = 19
+
+isComplex :: Ty -> Bool
+isComplex (Ptr{}) = True
+isComplex (Array{}) = True
+isComplex (Vector{}) = True
+isComplex (StructAnon{}) = True
+isComplex (StructNamed{}) = True
+isComplex (Function{}) = True
+isComplex _ = False
+
+isPrimitive :: Ty -> Bool
+isPrimitive = not . isComplex
+
+instance Ord Ty where
+  x <= y | isPrimitive x && isPrimitive y = orderIdx x <= orderIdx y
+         | isPrimitive x && isComplex y = True
+         | isComplex x && isComplex y = and $ (map (<=) (subTypes x)) <*> subTypes y
+         | otherwise = False
 
 subTypes :: Ty -> [Ty]
 subTypes (Ptr _ t) = t:subTypes t

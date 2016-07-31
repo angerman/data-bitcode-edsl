@@ -37,8 +37,8 @@ prefix (TRef{}) = text "ref "
 prefix (FwdRef i) = text "fwdRef" <+> int (fromIntegral i)
 
 suffix :: Value -> Doc
-suffix (Global{..}) = parens (pretty gInit) <+> text "::" <+> pretty (Ptr 0 gPointerType)
-suffix (V.Function{..}) = text "::" <+> pretty (Ptr 0 fType)
+suffix (Global{..}) = parens (pretty gInit) <+> text "::" <+> pretty gPointerType
+suffix (V.Function{..}) = text "::" <+> pretty fType
 suffix (Alias{..}) = empty
 suffix (Constant t c) = pretty c <+> text "::" <+> pretty t
 suffix (Arg t) = text "::" <+> pretty t

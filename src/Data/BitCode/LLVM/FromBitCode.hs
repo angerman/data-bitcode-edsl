@@ -254,7 +254,7 @@ parseGlobalVar
   let addressSpace = shift isConst (-2)
   let initVal = if initId /= 0 then Just (FwdRef (initId - 1)) else Nothing
 
-  tellValue $ Global ty (isConst /= 0) addressSpace initVal
+  tellValue $ Global (Ptr 0 ty) (isConst /= 0) addressSpace initVal
                      (toEnum' linkage) paramAttrId section (toEnum' visibility) (toEnum' threadLocalMode)
                      (unnamedAddr /= 0) (externallyInitialized /= 0) (toEnum' storageClass) comdat
 
@@ -266,7 +266,7 @@ parseFunctionDecl
   , prefixData, personality ]
   = do
   ty <- askType tyId
-  tellValue $ V.Function ty (toEnum' cconv) (isProto /= 0) (toEnum' linkage)
+  tellValue $ V.Function (Ptr 0 ty) (toEnum' cconv) (isProto /= 0) (toEnum' linkage)
                          paramAttrId alignment section (toEnum' visibility) gc
                          (unnamedAddr /= 0) prologueData (toEnum' storageClass)
                          comdat prefixData personality
@@ -307,23 +307,27 @@ parseModule bs = do
   let Just version = parseVersion     <$> lookupRecord VERSION bs
       triple  = parseTriple           <$> lookupRecord TRIPLE bs
       layout  = parseDataLayout       <$> lookupRecord DATALAYOUT bs
-      Just vst= parseSymbolValueTable <$> lookupBlock VALUE_SYMTAB bs
+      vst     = parseSymbolValueTable <$> lookupBlock VALUE_SYMTAB bs
 
   flip mapM_  bs $ \case
     (NBlock c bs') -> parseModuleBlock (toEnum c, bs')
     (NRec   c vs)  -> parseModuleRecord (toEnum c, vs)
 
   -- update values with symbols
-  tellValueSymbolTable vst
+  case vst of
+    Just vst -> tellValueSymbolTable vst
+    Nothing -> pure ()
 
   -- update forward references
   resolveFwdRefs <$> askValueList >>= tellValueList
-  
+
   -- obtain a snapshot of all current values
   values <- askValueList
 
-  let functionDefs = [f | f@(Named _ (V.Function {..})) <- values, not fIsProto]
-      functionDecl = [f | f@(Named _ (V.Function {..})) <- values, fIsProto ]
+  let functionDefs = [f | f@(Named _ (V.Function {..})) <- values, not fIsProto] ++
+                     [f | f@(Unnamed (V.Function {..})) <- values, not fIsProto]
+      functionDecl = [f | f@(Named _ (V.Function {..})) <- values, fIsProto ] ++
+                     [f | f@(Unnamed (V.Function {..})) <- values, fIsProto ]
   (unless (length functionDefs == length functionBlocks)) $ fail $ "#functionDecls (" ++ show (length functionDefs) ++ ") does not match #functionBodies (" ++ show (length functionBlocks) ++ ")"
 
   fns <- mapM parseFunction (zip functionDefs functionBlocks)
@@ -409,7 +413,7 @@ parseFunction (f@(Named _ V.Function{..}), b) = do
   savedValueList <- askValueList
   savedVST       <- askValueSymbolTable
   -- Not sure what we do about Uselist yet.
-  let T.Function _ _ paramTys = fType
+  let Ptr _ (T.Function _ _ paramTys) = fType
   -- put the decl header onto the valuelist.
   mapM_ (tellValue . Arg) paramTys
   nVals' <- length <$> askValueList
@@ -431,6 +435,8 @@ parseFunction (f@(Named _ V.Function{..}), b) = do
   tellValueList savedValueList
   tellValueSymbolTable savedVST
   return $ F.Function f consts (reverse bbs)
+
+parseFunction ((Unnamed f), b) = parseFunction ((Named "dummy" f), b)
 
 parseFunction _ = fail "Invalid arguments"
 
@@ -484,13 +490,11 @@ parseInst rs = \case
             swiftErrorMask = shift 1 7
 
   (FUNC_CODE_INST_LOAD, [ op, opty, align, vol]) -> do
-    nValues <- length <$> askValueList
     oTy <- askType opty
     val <- getRelativeVal rs op
     return . Just $ Load oTy val (2^(align-1))
 
   (FUNC_CODE_INST_CMP2, [lhs, rhs, pred]) -> do
-    nValues <- length <$> askValueList
     lhs' <- getRelativeVal rs lhs
     rhs' <- getRelativeVal rs rhs
     -- result type is:
@@ -502,8 +506,6 @@ parseInst rs = \case
     return . Just $ Cmp2 oTy lhs' rhs' (toEnum' pred)
 
   (FUNC_CODE_INST_STORE, [ ptr, val, align, vol ]) -> do
-    -- pTy <- askType ptrty
-    nValues <- length <$> askValueList
     ref <- getRelativeVal rs ptr
     val <- getRelativeVal rs val
     return . Just $ Store ref val (2^(align-1))
