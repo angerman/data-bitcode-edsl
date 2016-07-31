@@ -2,7 +2,37 @@
 
 Pure haskell support for reading and writing the BitCode Container Format.
 
--- 
+---
+
+# Tools
+
+To see the block list (as seen by the bitcode reader), use
+
+```
+$ llvm-bcanalyzer file.bc -dump|less
+```
+
+to verify the dissassembly looks as expected, use
+
+```
+$ llvm-dis -f file.bc -show-annotations && less file.ll
+```
+
+and to turn the produced bitcode into a binary, use
+
+```
+$ llc file.bc -filetype=obj # will produce file.o
+```
+
+to subsequently link with a linker.
+
+`clang` however can do all the linking from a bc file onwards:
+
+```
+$ clang file.bc && ./a.out
+```
+
+---
 
 # TODO
 
@@ -54,11 +84,13 @@ Pure haskell support for reading and writing the BitCode Container Format.
     - [x] Lookup Value Idx's and replace them with their references.
   - [x] Build VSTs (necessary to properly be able to link external functions.)
 
-* Medium Prio:
+# Medium Prio:
+
 - [ ] Rename `XXX_CODE_YYY` into `YYY`, they usually live in the corresponding module anyway.
 - [ ] Drop the Call Markers file and unify with BitFlags (including inAllocaMask, SwiftErrorMask, ...)
 
-* Low Prio:
+# Low Prio:
+
 - [ ] Writer: Add support for VST Offsets to the writer (since 3.8).
       (Not sure if this will be mandatory in the future).
       See: https://reviews.llvm.org/D12536
