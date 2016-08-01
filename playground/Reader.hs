@@ -87,3 +87,15 @@ testToBitCodeFromFile :: FilePath -> IO [BitCode]
 testToBitCodeFromFile f = testParse f >>= \case
   Left err -> fail err
   Right (i, m) -> return $ map denormalize $ toBitCode (i, m)
+
+-- how should the building of a module look like
+-- buildModule = do
+--   let s      = global (cStr "hello world\n")           -- this is going to point to some array of i8.
+--       printf = decl "printf" ([ptr i8, vargs] --> i32) -- just the function decl
+--       puts   = decl "puts" ([ptr i8] --> i32)          -- just another function decl
+--   func "main" ([i32, (ptr (ptr i8)] --> i32) $ do      -- main def.
+--     let s' = gep s [(const 0), (const 0)]              -- turn i8** -> i8* -> i8; however s' is pointing to that i8, hence s' is i8*
+--     call puts [s']
+--     ret (const 0)                                      -- this should add (const 0) to the constants.
+
+-- how to deal with basic blocks?

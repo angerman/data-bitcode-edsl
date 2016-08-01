@@ -7,11 +7,14 @@ import Data.BitCode.LLVM.Type  (Ty(Ptr))
 import Data.BitCode.LLVM.Value (Symbol)
 import Data.BitCode.LLVM.Cmp   (Predicate)
 
+import Data.BitCode.LLVM.Opcodes.Binary (Op)
+
 
 data Inst
   -- | Ty and Value type should match up. If Ty is Metadata, then the Value is takes from the Metadata List
   -- else from the value list.
-  = Alloca Ty Symbol Align  -- this would produce a typed ref. Ref, Alignment of 0 means, the backend can choose an appropriate alignment.
+  = BinOp Ty Op Symbol Symbol
+  | Alloca Ty Symbol Align  -- this would produce a typed ref. Ref, Alignment of 0 means, the backend can choose an appropriate alignment.
   -- | Load instruction
   | Load Ty Symbol Align
   -- | Store instruction. Store the Value in the Typed Ref.
@@ -56,6 +59,7 @@ instTy (Ret{}) = Nothing
 instTy (UBr{}) = Nothing
 instTy (Br{}) = Nothing
 instTy (Cmp2 t _ _ _) = Just t
+instTy (BinOp t _ _ _ ) = Just t
 -- GEP returns a pointer to it's type. In the
 --     same address space.
 -- TODO: This *is* incorrect.

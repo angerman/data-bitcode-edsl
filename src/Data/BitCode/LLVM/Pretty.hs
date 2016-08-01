@@ -111,6 +111,7 @@ instance Pretty CallingConv where
   pretty c = text (map toLower (show c)) <> text "call"
 
 instance Pretty Inst where
+  pretty (I.BinOp t o l r) = parens (pretty l) <+> text (map toLower $ show o) <+> parens (pretty r) <+> text "::" <+> pretty t
   pretty (Alloca t v _) = text "alloca" <+> parens (pretty v) <+> text "::" <+> pretty t
   pretty (Load   t v _) = text "load" <+> parens (pretty v) <+> text "::" <+> pretty t
   pretty (Store  v r _) = pretty r <+> text "->" <+> pretty v

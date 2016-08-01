@@ -34,6 +34,8 @@ import Data.Maybe (catMaybes, fromMaybe)
 
 import Data.BitCode.LLVM.Flags.CallMarkers as CM
 
+import Data.BitCode.LLVM.Opcodes.Binary as BinOp
+
 import Debug.Trace
 
 -- Conceptuall we take bitcode and interpret it as LLVM IR.
@@ -474,27 +476,83 @@ foldHelper s@((BasicBlock insts):bbs,vs) instr = do
 
 parseInst :: [Symbol] -> (Instruction, [BC.Val]) -> LLVMReader (Maybe Inst)
 parseInst rs = \case
-  i@(FUNC_CODE_DECLAREBLOCKS, r) -> do
+  -- 1
+  i@(DECLAREBLOCKS, r) -> do
     -- TODO: setup the number of declared blocks
     traceM $ show i
     return Nothing
-  (FUNC_CODE_INST_ALLOCA, [ instty, opty, op, align ]) -> do
+  -- 2
+  -- XXX We currently ignore flags!
+  (INST_BINOP, (lhs:rhs:code:flags)) -> do
+    lhs <- getRelativeVal rs lhs
+    rhs <- getRelativeVal rs rhs
+    let opTy = ty (symbolValue lhs)
+    return $ Just (I.BinOp opTy (toEnum' code) lhs rhs)
+  -- 3
+  -- (INST_CAST, vals)
+  -- 4
+  -- (INST_GEP_OLD, vals)
+  -- 5
+  -- (INST_SELECT, vals)
+  -- 6
+  -- (INST_EXTRACTELT, vals)
+  -- 7
+  -- (INST_INSERTELT, vals)
+  -- 8
+  -- (INST_SHUFFLEVEC, vals)
+  -- 9
+  -- (INST_CMP, vals)
+  -- 10
+-- Even thought the documentaiton sais [ty [, val]], it's
+-- actually [val] (or [val, ty] in case of fwd ref).
+-- if [val] is empty. It' a Void return.
+  (INST_RET, []) -> return . Just $ I.Ret Nothing
+  (INST_RET, [valId]) -> do
+    val <- Just <$> getRelativeVal rs valId
+    return . Just $ I.Ret val
+  -- 11
+  (INST_BR, [bbN]) -> return . Just $ UBr bbN
+  (INST_BR, [bbN, bbN', cond]) -> do
+    cond' <- getRelativeVal rs cond
+    return . Just $ Br cond' bbN bbN'
+  -- 12
+  -- (INST_SWITCH, vals)
+  -- 13
+  -- (INST_INVOKE, vals)
+  -- 14 - Unused
+  -- 15
+  -- (INST_UNREACHABLE, [])
+  -- 16
+  -- (INST_PHI, (ty:val:[bbs]))
+  -- 17, 18 - Unused
+  -- 19
+  (INST_ALLOCA, [ instty, opty, op, align ]) -> do
     iTy <- askType instty
     oTy <- askType opty
     val <- askValue op -- probably a constant.
-    return . Just $  Alloca iTy val (decodeAlign align)
+    return . Just $  Alloca (Ptr 0 iTy) val (decodeAlign align)
       where decodeAlign :: Word64 -> Word64
             decodeAlign a = 2^((a .&. (complement inAllocMask .|. explicitTypeMask .|. swiftErrorMask)) - 1)
             inAllocMask = shift 1 5
             explicitTypeMask = shift 1 6
             swiftErrorMask = shift 1 7
-
-  (FUNC_CODE_INST_LOAD, [ op, opty, align, vol]) -> do
+  -- 20
+  (INST_LOAD, [ op, opty, align, vol]) -> do
     oTy <- askType opty
     val <- getRelativeVal rs op
     return . Just $ Load oTy val (2^(align-1))
-
-  (FUNC_CODE_INST_CMP2, [lhs, rhs, pred]) -> do
+  -- 21, 22 - Unused
+  -- 23
+  -- (INST_VAARG, [ valistty, valist, instty ])
+  -- 24
+  -- (INST_STORE_OLD [ ptrty, ptr, val, align, vol])
+  -- 25 - Unused
+  -- 26
+  -- (INST_EXTRACTVAL, ops)
+  -- 27
+  -- (INST_INSERTVAL, ops)
+  -- 28
+  (INST_CMP2, [lhs, rhs, pred]) -> do
     lhs' <- getRelativeVal rs lhs
     rhs' <- getRelativeVal rs rhs
     -- result type is:
@@ -504,18 +562,21 @@ parseInst rs = \case
           Vector n _ -> Array n (T.Int 1)
           _ -> T.Int 1
     return . Just $ Cmp2 oTy lhs' rhs' (toEnum' pred)
-
-  (FUNC_CODE_INST_STORE, [ ptr, val, align, vol ]) -> do
-    ref <- getRelativeVal rs ptr
-    val <- getRelativeVal rs val
-    return . Just $ Store ref val (2^(align-1))
-
--- [paramattrs, cc[, fmf][, explfnty], fnid, arg0, arg1...]
-  (FUNC_CODE_INST_CALL, (paramattr:cc:ops)) -> do
+  -- 29
+  -- (INST_VSELECT, [ ty, opval, opval, predty, pred])
+  -- 30
+  -- (INST_INBOUNDS_GEP_OLD, ops)
+  -- 31
+  -- (INST_INDIRECTBR, (opty:ops))
+  -- 32 - Unused
+  -- 33
+  -- (DEBUG_LOC_AGAIN, [])
+  -- 34
+  -- [paramattrs, cc[, fmf][, explfnty], fnid, arg0, arg1...]
+  (INST_CALL, (paramattr:cc:ops)) -> do
     let (fmf, ops') = if testBit cc (fromEnum CALL_FMF) then (Just (head ops), tail ops) else (Nothing, ops)
     let (explFnTy, ops') = if testBit cc (fromEnum CALL_EXPLICIT_TYPE) then (Just (head ops), tail ops) else (Nothing, ops)
     let (fnid:args) = ops'
-    nValues <- length <$> askValueList
     fn <- getRelativeVal rs fnid
 
     fnTy <- case explFnTy of
@@ -524,28 +585,52 @@ parseInst rs = \case
 
     args <- mapM (getRelativeVal rs) args
     return . Just $ Call (teRetTy fnTy) fn args
-
--- Even thought the documentaiton sais [ty [, val]], it's
--- actually [val] (or [val, ty] in case of fwd ref).
--- if [val] is empty. It' a Void return.
-  (FUNC_CODE_INST_RET, []) -> return . Just $ I.Ret Nothing
-  (FUNC_CODE_INST_RET, [valId]) -> do
-    nValues <- length <$> askValueList
-    val <- Just <$> getRelativeVal rs valId
-    return . Just $ I.Ret val
-
-  (FUNC_CODE_INST_BR, [bbN]) -> return . Just $ UBr bbN
-  (FUNC_CODE_INST_BR, [bbN, bbN', cond]) -> do
-    nValues <- length <$> askValueList
-    cond' <- getRelativeVal rs cond
-    return . Just $ Br cond' bbN bbN'
-
-  (FUNC_CODE_INST_GEP, (inbounds:opty:vs)) -> do
-    nValues <- length <$> askValueList
+  -- 35
+  -- (DEBUG_LOC)
+  -- 36
+  -- (INST_FENCE, [ordering, synchscope])
+  -- 37
+  -- (INST_CMPXCHG_OLD, [ptrty, ptr, cmp, new, align, vol, ordering, synchscope])
+  -- 38
+  -- (INST_ATOMICRMW, [ptrty, ptr, val, operation, align, vol,ordering, synchscope])
+  -- 39
+  -- (INST_RESUME, [opval])
+  -- 40
+  -- (INST_LANDINGPAD_OLD, [ty, val, val, num, id0, val0, ...])
+  -- 41
+  -- (INST_LOADATOMIC, [opty, op, align, vol, ordering, synchscope])
+  -- 42
+  -- (INST_STOREATOMIC_OLD, [ptrty, ptr, val, align, vol, odering, synchscope])
+  -- 43
+  (INST_GEP, (inbounds:opty:vs)) -> do
     oTy <- askType opty
     (val:idxs) <- mapM (getRelativeVal rs) vs
     return . Just $ I.Gep oTy (inbounds /= 0) val idxs
-
+  -- 44
+  (INST_STORE, [ ptr, val, align, vol ]) -> do
+    ref <- getRelativeVal rs ptr
+    val <- getRelativeVal rs val
+    return . Just $ Store ref val (2^(align-1))
+  -- 45
+  -- (INST_STOREATOMIC, [ ptr, val, align, vol ])
+  -- 46
+  -- (INST_CMPXCHG, [ ptrty, ptr, valty, cmp, new, align, vol, ordering, synchscope])
+  -- 47
+  -- (INST_LANDINGPAD, [ ty, val, num, id0, val0, ...])
+  -- 48
+  -- (INST_CLEANUPRET, [val])
+  -- (INST_CLEANUPRET, [val, bb#])
+  -- 49
+  -- (INST_CATCHRET, [val, bb#])
+  -- 50
+  -- (INST_CATCHPAD, [bb#, bb#, num, args...])
+  -- 51
+  -- (INST_CLEANUPPAD, [num, args...])
+  -- 52
+  -- (INST_CATCHSWITCH, [num, args...])
+  -- (INST_CATCHSWITCH, [num, args..., bb])
+  -- 53, 54 - Unused
+  -- (OPERAND_BUNDLE, vals)
   -- ignore all other instructions for now.
   r -> fail $ show r
 

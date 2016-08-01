@@ -252,7 +252,7 @@ instance ToNBitCode (Maybe Ident, Module) where
       {- Declare blocks, constants, instructions, vst -}
       mkFunctionBlock (Function sig consts bbs)
         = mkBlock FUNCTION $
-          [ mkRec FC.FUNC_CODE_DECLAREBLOCKS (length bbs) ] ++
+          [ mkRec FC.DECLAREBLOCKS (length bbs) ] ++
           [ mkConstBlock bodyVals fconstants ] ++
           -- this is a *bit* ugly.
           -- We use a fold to carry the instruction count through
@@ -306,26 +306,26 @@ instance ToNBitCode (Maybe Ident, Module) where
               -- Build instructions.
               mkInstRec :: Int -> I.Inst -> NBitCode
               -- TODO: If we want to support InAlloca, we need to extend Alloca. For now we will not set the flag.
-              mkInstRec n (I.Alloca t s a) = mkRec FC.FUNC_CODE_INST_ALLOCA [ lookupIndex allTypes t
-                                                                            , lookupIndex allTypes . ty . V.symbolValue $ s
-                                                                            , lookupIndex allVals (V.symbolValue s)
-                                                                            , explicitTypeMask .|. bitWidth a
-                                                                            ]
+              mkInstRec n (I.Alloca t s a) = mkRec FC.INST_ALLOCA [ lookupIndex allTypes (T.tePointeeTy t)
+                                                                  , lookupIndex allTypes . ty . V.symbolValue $ s
+                                                                  , lookupIndex allVals (V.symbolValue s)
+                                                                  , explicitTypeMask .|. bitWidth a
+                                                                  ]
               -- TODO: Support Volatile flag
-              mkInstRec n (I.Load _ s a) = mkRec FC.FUNC_CODE_INST_LOAD [ lookupRelativeSymbolIndex' n s
+              mkInstRec n (I.Load _ s a) = mkRec FC.INST_LOAD [ lookupRelativeSymbolIndex' n s
                                                                         , lookupIndex allTypes . T.tePointeeTy . ty . V.symbolValue $ s
                                                                         , bitWidth a
                                                                         , 0
                                                                         ]
               -- TODO: Support Volatile flag
-              mkInstRec n (I.Store ref val a) = mkRec FC.FUNC_CODE_INST_STORE [ lookupRelativeSymbolIndex' n ref
+              mkInstRec n (I.Store ref val a) = mkRec FC.INST_STORE [ lookupRelativeSymbolIndex' n ref
                                                                               , lookupRelativeSymbolIndex' n val
                                                                               , bitWidth a
                                                                               , 0
                                                                               ]
               -- TODO: Support FMF and Explicit Type flags explicitly
               -- XXX: Call needs paramAttrs! -- Can use 0 for empty param set.
-              mkInstRec n (I.Call _ fn args) = mkRec FC.FUNC_CODE_INST_CALL $ [ (0 :: Int) -- Fix PARAMATTR
+              mkInstRec n (I.Call _ fn args) = mkRec FC.INST_CALL $ [ (0 :: Int) -- Fix PARAMATTR
                                                                                , fromEnum' (V.fCallingConv (V.symbolValue fn)) .|. (setBit 0 (fromEnum' CALL_EXPLICIT_TYPE))
                                                                                , lookupIndex allTypes fnTy
                                                                                , lookupRelativeSymbolIndex' n fn
@@ -339,19 +339,19 @@ instance ToNBitCode (Maybe Ident, Module) where
                                                   -- type from the pointer that the function type is.
                                                   fnTy = T.tePointeeTy (V.fType (V.symbolValue fn))
 
-              mkInstRec n (I.Cmp2 _ lhs rhs pred) = mkRec FC.FUNC_CODE_INST_CMP2 [ lookupRelativeSymbolIndex' n lhs
+              mkInstRec n (I.Cmp2 _ lhs rhs pred) = mkRec FC.INST_CMP2 [ lookupRelativeSymbolIndex' n lhs
                                                                                  , lookupRelativeSymbolIndex' n rhs
                                                                                  , fromEnum' pred :: Int
                                                                                  ]
 
-              mkInstRec n (I.Gep ty inbounds base idxs) = mkRec FC.FUNC_CODE_INST_GEP $ [ (bool inbounds) :: Int
+              mkInstRec n (I.Gep ty inbounds base idxs) = mkRec FC.INST_GEP $ [ (bool inbounds) :: Int
                                                                                         , lookupIndex allTypes ty]
                                                           ++ map (lookupRelativeSymbolIndex' n) (base:idxs)
 
-              mkInstRec n (I.Ret (Just val)) = mkRec FC.FUNC_CODE_INST_RET [ lookupRelativeSymbolIndex' n val :: Int ]
-              mkInstRec n (I.Ret Nothing)    = mkEmptyRec FC.FUNC_CODE_INST_RET
-              mkInstRec n (I.UBr bbId)       = mkRec FC.FUNC_CODE_INST_BR [bbId]
-              mkInstRec n (I.Br val bbId bbId') = mkRec FC.FUNC_CODE_INST_BR [ bbId
+              mkInstRec n (I.Ret (Just val)) = mkRec FC.INST_RET [ lookupRelativeSymbolIndex' n val :: Int ]
+              mkInstRec n (I.Ret Nothing)    = mkEmptyRec FC.INST_RET
+              mkInstRec n (I.UBr bbId)       = mkRec FC.INST_BR [bbId]
+              mkInstRec n (I.Br val bbId bbId') = mkRec FC.INST_BR [ bbId
                                                                              , bbId'
                                                                              , lookupRelativeSymbolIndex' n val
                                                                              ]
