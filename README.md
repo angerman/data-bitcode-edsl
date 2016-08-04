@@ -35,7 +35,8 @@ $ clang file.bc && ./a.out
 ---
 
 # TODO: 
-- [ ] build sample ask that uses more than one function. (e.g. call out to a second function)
+- [ ] build sample app that uses more than one function. (e.g. call out to a second function)
+- [ ] Unify ANON_STRUCT and NAMED_STRUCT. If it has a name it's named, otherwise it's anonynmous.
 
 # High Prio
 
