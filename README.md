@@ -37,6 +37,10 @@ $ clang file.bc && ./a.out
 # TODO: 
 - [ ] build sample app that uses more than one function. (e.g. call out to a second function)
 - [ ] Unify ANON_STRUCT and NAMED_STRUCT. If it has a name it's named, otherwise it's anonynmous.
+- [ ] Put CallingConv into the function type, instead of the function. The issue is that we might
+      bitcast a function, but loose the relevant information on how to call the casted result, if
+      we do not store the relevant information in the result of a cast op.
+- [ ] Resolve all ForwardReferences (A few more FwdRef's were introduced that are non yet all resolved).
 
 # High Prio
 
