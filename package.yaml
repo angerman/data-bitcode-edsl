@@ -7,17 +7,17 @@ maintainer: Moritz Angermann <moritz@lichtzwerge.de>
 copyright: lichtzwerge GmbH
 category: Experimentation
 
-github: lichtzwerge/bitcode-playground
+github: angerman/bitcode-playground
 
 dependencies:
   - base >= 4.7 && < 5
   - pretty >= 1.1
   - bytestring >= 0.10
   - base16-bytestring
+  - data-bitcode
+  - data-bitcode-llvm
 
 library:
   source-dirs:
     - src
-    - data-bitcode/src
-    - data-bitcode-llvm/src
 

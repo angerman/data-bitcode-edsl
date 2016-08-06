@@ -6,8 +6,8 @@ name:           bitcode-playground
 version:        0.1.0.0
 synopsis:       bitcode experimentation
 category:       Experimentation
-homepage:       https://github.com/lichtzwerge/bitcode-playground#readme
-bug-reports:    https://github.com/lichtzwerge/bitcode-playground/issues
+homepage:       https://github.com/angerman/bitcode-playground#readme
+bug-reports:    https://github.com/angerman/bitcode-playground/issues
 author:         Moritz Angermann <moritz@lichtzwerge.de>
 maintainer:     Moritz Angermann <moritz@lichtzwerge.de>
 copyright:      lichtzwerge GmbH
@@ -18,18 +18,18 @@ cabal-version:  >= 1.10
 
 source-repository head
   type: git
-  location: https://github.com/lichtzwerge/bitcode-playground
+  location: https://github.com/angerman/bitcode-playground
 
 library
   hs-source-dirs:
       src
-    , data-bitcode/src
-    , data-bitcode-llvm/src
   build-depends:
       base >= 4.7 && < 5
     , pretty >= 1.1
     , bytestring >= 0.10
     , base16-bytestring
+    , data-bitcode
+    , data-bitcode-llvm
   exposed-modules:
       Annotated.HelloWorld
       EDSL
@@ -44,59 +44,4 @@ library
       Playground
       PlaygroundReader
       Reader
-      Data.BitCode
-      Data.BitCode.Abbreviation
-      Data.BitCode.AbbrevOpEncoding
-      Data.BitCode.Codes.BlockInfo
-      Data.BitCode.IDs.FixedAbbrev
-      Data.BitCode.IDs.StandardBlock
-      Data.BitCode.Reader
-      Data.BitCode.Reader.Combinators
-      Data.BitCode.Reader.FromBits
-      Data.BitCode.Reader.Monad
-      Data.BitCode.Writer
-      Data.BitCode.Writer.Combinators
-      Data.BitCode.Writer.Monad
-      Data.BitCode.Writer.ToBits
-      Data.BitCode.LLVM
-      Data.BitCode.LLVM.CallingConv
-      Data.BitCode.LLVM.Classes.ToSymbols
-      Data.BitCode.LLVM.Cmp
-      Data.BitCode.LLVM.Codes.AtomicOrdering
-      Data.BitCode.LLVM.Codes.Attribute
-      Data.BitCode.LLVM.Codes.AttributeKind
-      Data.BitCode.LLVM.Codes.ComdatSelectionKind
-      Data.BitCode.LLVM.Codes.Constants
-      Data.BitCode.LLVM.Codes.Function
-      Data.BitCode.LLVM.Codes.FunctionSummarySymtab
-      Data.BitCode.LLVM.Codes.Identification
-      Data.BitCode.LLVM.Codes.Metadata
-      Data.BitCode.LLVM.Codes.Module
-      Data.BitCode.LLVM.Codes.ModulePathSymtab
-      Data.BitCode.LLVM.Codes.OperandBundleTag
-      Data.BitCode.LLVM.Codes.SynchronizationScope
-      Data.BitCode.LLVM.Codes.Type
-      Data.BitCode.LLVM.Codes.TypeSymtab
-      Data.BitCode.LLVM.Codes.UseList
-      Data.BitCode.LLVM.Codes.ValueSymtab
-      Data.BitCode.LLVM.Flags
-      Data.BitCode.LLVM.FromBitCode
-      Data.BitCode.LLVM.Function
-      Data.BitCode.LLVM.IDs.Blocks
-      Data.BitCode.LLVM.Instruction
-      Data.BitCode.LLVM.Linkage
-      Data.BitCode.LLVM.Metadata
-      Data.BitCode.LLVM.Opcodes.Binary
-      Data.BitCode.LLVM.Opcodes.Cast
-      Data.BitCode.LLVM.ParamAttr
-      Data.BitCode.LLVM.Pretty
-      Data.BitCode.LLVM.Reader.Monad
-      Data.BitCode.LLVM.RWMOperations
-      Data.BitCode.LLVM.StorageClass
-      Data.BitCode.LLVM.ThreadLocalMode
-      Data.BitCode.LLVM.ToBitCode
-      Data.BitCode.LLVM.Type
-      Data.BitCode.LLVM.Types
-      Data.BitCode.LLVM.Value
-      Data.BitCode.LLVM.Visibility
   default-language: Haskell2010
