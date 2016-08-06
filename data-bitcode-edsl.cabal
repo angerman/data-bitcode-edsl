@@ -2,7 +2,7 @@
 --
 -- see: https://github.com/sol/hpack
 
-name:           bitcode-playground
+name:           data-bitcode-edsl
 version:        0.1.0.0
 synopsis:       bitcode experimentation
 category:       Experimentation
@@ -39,9 +39,6 @@ library
       EDSL.Monad
       EDSL.Types
       EDSL.Values
-      HelloMod
-      Lib
-      Playground
-      PlaygroundReader
-      Reader
+      Playground.EDSL
+      Playground.Reader
   default-language: Haskell2010

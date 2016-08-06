@@ -1,5 +1,9 @@
-resolver: nightly-2016-08-02
+resolver: lts-6.10
 packages:
 - '.'
-- 'data-bitcode'
-- 'data-bitcode-llvm'
+- '../data-bitcode'
+- '../data-bitcode-llvm'
+
+extra-deps: []
+flags: {}
+extra-package-dbs: []

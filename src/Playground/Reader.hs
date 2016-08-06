@@ -1,7 +1,7 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE LambdaCase    #-}
 
-module Reader where
+module Playground.Reader where
 
 import Prelude hiding (read, readFile, writeFile)
 import Data.BitCode

@@ -1,4 +1,4 @@
-module Playground where
+module Playground.EDSL where
 
 import EDSL
 import Text.PrettyPrint (Doc)
