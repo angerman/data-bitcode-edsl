@@ -30,6 +30,7 @@ library
     , base16-bytestring
     , data-bitcode
     , data-bitcode-llvm
+    , transformers
   exposed-modules:
       Annotated.HelloWorld
       EDSL

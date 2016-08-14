@@ -16,6 +16,7 @@ dependencies:
   - base16-bytestring
   - data-bitcode
   - data-bitcode-llvm
+  - transformers
 
 library:
   source-dirs:

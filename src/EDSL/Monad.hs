@@ -1,6 +1,7 @@
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE LambdaCase, GeneralizedNewtypeDeriving #-}
 module EDSL.Monad
-  (BodyBuilder
+  (BodyBuilderT, BodyBuilder
+  , execBodyBuilderT
   , execBodyBuilder
   , tellInst
   , tellInst'
@@ -11,9 +12,19 @@ module EDSL.Monad
 import Control.Monad.Fix (MonadFix(..))
 
 import Data.BitCode.LLVM.Types (BasicBlockId)
+import Data.BitCode.LLVM.Util
+import Data.BitCode.LLVM.Pretty
+import Text.PrettyPrint
+import Data.Maybe (fromMaybe)
 import qualified Data.BitCode.LLVM.Instruction     as Inst
 import qualified Data.BitCode.LLVM.Function        as Func
 import qualified Data.BitCode.LLVM.Value           as Val
+
+import Control.Monad.IO.Class
+import Control.Monad.Trans.State
+import Data.Functor.Identity
+import Control.Monad.Trans.Class
+
 
 --------------------------------------------------------------------------------
 -- Function Body Monad... or building blocks is monadic.
@@ -36,27 +47,24 @@ data FnCtx = FnCtx { nInst :: Int, nRef :: Int, nBlocks :: Int, blocks :: [Func.
 --           shiftV m n (Val.TRef t r)     = (Val.TRef t (shiftR m n r))
 --           shiftV _ _ x                  = x
 --           shiftR                        = (+)
+-- FnCtx -> (a, FnCtx)
 
-newtype BodyBuilder a = BodyBuilder { runBodyBuilder :: FnCtx -> (a, FnCtx) }
+newtype BodyBuilderT m a = BodyBuilderT { runBodyBuilderT :: StateT FnCtx m a }
+  deriving (Functor, Applicative, Monad, MonadTrans, MonadFix, MonadIO)
+
+type BodyBuilder a = BodyBuilderT Identity a
+
+modifyCtx :: Monad m => (FnCtx -> FnCtx) -> BodyBuilderT m ()
+modifyCtx = BodyBuilderT . modify
+getsCtx :: Monad m => (FnCtx -> a) -> BodyBuilderT m a
+getsCtx = BodyBuilderT . gets
 
 -- mapping over blocks
-execBodyBuilder :: Int -> BodyBuilder a -> [Func.BasicBlock]
-execBodyBuilder instOffset = map (Func.bbmap reverse) . reverse . blocks . snd . flip runBodyBuilder (FnCtx instOffset 0 0 mempty)
+execBodyBuilderT :: Monad m => Int -> BodyBuilderT m a -> m [Func.BasicBlock]
+execBodyBuilderT instOffset = fmap (map (Func.bbmap reverse) . reverse . blocks . snd) . flip runStateT (FnCtx instOffset 0 0 mempty) . runBodyBuilderT
 
-instance Functor BodyBuilder where
-  fmap f b = BodyBuilder $ \c -> let (x, s) = runBodyBuilder b c in (f x, s)
-
-instance Applicative BodyBuilder where
-  pure x = BodyBuilder $ \c -> (x, c)
-  a <*> b = error $ "No applicative interface!"
-
-instance Monad BodyBuilder where
-  m >>= k = BodyBuilder $ \s -> let (x, s') = runBodyBuilder m s
-                                in runBodyBuilder (k x) s'
-
-instance MonadFix BodyBuilder where
-  mfix f = BodyBuilder $ \c -> let (x, s') = runBodyBuilder (f x) c
-                               in (x, s')
+execBodyBuilder :: Int -> BodyBuilderT Identity a -> [Func.BasicBlock]
+execBodyBuilder instOffset = runIdentity . execBodyBuilderT instOffset
 
 -- | Adds an instruction to a block.
 addInst :: Func.BasicBlock -> Func.BlockInst -> Func.BasicBlock
@@ -66,19 +74,33 @@ addInst (Func.NamedBlock n is) i = (Func.NamedBlock n (i:is))
 -- | Add an instruction to the current block.
 -- returns @Just ref@ if the instruction retuns
 -- a value. @Nothing@ if the instruction has no result.
-tellInst :: Inst.Inst -> BodyBuilder (Maybe Val.Symbol)
-tellInst inst = BodyBuilder $ \(FnCtx ni nr nb (b:bbs)) -> case Val.Unnamed . flip Val.TRef nr <$> Inst.instTy inst of
-                                                             ref@(Just _) -> (ref, FnCtx (ni + 1) (nr + 1) nb ((addInst b (ref, inst)):bbs))
-                                                             ref@Nothing  -> (ref, FnCtx (ni + 1) nr       nb ((addInst b (ref, inst)):bbs))
+tellInst :: Monad m => Inst.Inst -> BodyBuilderT m (Maybe Val.Symbol)
+tellInst inst = do
+  nr <- getsCtx nRef
+  case Val.Unnamed . flip Val.TRef nr <$> instTy inst of
+    ref@(Just _) -> do modifyCtx (\ctx -> ctx { nInst  = 1 + nInst ctx
+                                              , nRef   = 1 + nRef ctx
+                                              , blocks = let (b:bbs) = blocks ctx
+                                                         in ((addInst b (ref, inst)):bbs)
+                                              })
+                       pure ref
+    ref@Nothing  -> do modifyCtx (\ctx -> ctx { nInst = 1 + nInst ctx
+                                              , blocks = let (b:bbs) = blocks ctx
+                                                         in ((addInst b (ref, inst)):bbs)
+                                              })
+                       pure ref
 
 -- | Add an instruction to the current block
 -- and obtain it's return value.  WARN: Use this
 -- only if you know the instruction returns a value.
-tellInst' :: Inst.Inst -> BodyBuilder Val.Symbol
+tellInst' :: Monad m => Inst.Inst -> BodyBuilderT m Val.Symbol
 tellInst' inst = tellInst inst >>= \case
   Just s -> pure s
   Nothing -> fail ("Expected instruction " ++ show inst ++ " to return a symbol!")
 
 -- | Adds a new block to the function.
-tellNewBlock :: BodyBuilder BasicBlockId
-tellNewBlock = BodyBuilder $ \(FnCtx ni nr nb bbs) -> (fromIntegral nb, FnCtx ni nr (nb + 1) ((Func.BasicBlock []):bbs))
+tellNewBlock :: Monad m => BodyBuilderT m BasicBlockId
+tellNewBlock = do
+  blockId <- getsCtx (fromIntegral . nBlocks)
+  modifyCtx (\c -> c { nBlocks = (nBlocks c) + 1, blocks = (Func.BasicBlock []):blocks c})
+  return blockId

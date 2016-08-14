@@ -6,6 +6,7 @@ module Playground.Reader where
 import Prelude hiding (read, readFile, writeFile)
 import Data.BitCode
 import Data.BitCode.LLVM
+import Data.BitCode.LLVM.Classes.HasType
 import Data.BitCode.LLVM.Reader.Monad
 import Data.BitCode.LLVM.FromBitCode hiding (BitCode)
 import Data.BitCode.Reader.Monad
