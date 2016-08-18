@@ -2,6 +2,7 @@ module EDSL.Values where
 
 import EDSL.Types
 
+import Data.BitCode.LLVM.Classes.HasType (ty)
 import qualified Data.BitCode.LLVM.Type            as Ty
 import qualified Data.BitCode.LLVM.Value           as Val
 import qualified Data.BitCode.LLVM.Linkage         as Linkage
@@ -50,7 +51,7 @@ defSymbol = undefined
 -- Globals (globals, functions, aliases)
 defGlobal, defFunction, defAlias :: Val.Value
 defGlobal   = Val.Global void True 0 Nothing defLinkage 0 0 defVisibility defTLM False False defStorageClass 0
-defFunction = Val.Function void defCC True defLinkage 0 0 0 defVisibility 0 False 0 defStorageClass 0 0 0
+defFunction = Val.Function void defCC True defLinkage 0 0 0 defVisibility 0 False Nothing defStorageClass 0 Nothing 0
 defAlias    = Val.Alias void 0 defSymbol defLinkage defVisibility defTLM False defStorageClass
 
 -- * Constant Values
@@ -72,3 +73,14 @@ float128 = float 128
 
 undef :: Ty.Ty -> Val.Symbol
 undef = Val.Unnamed . flip Val.Constant Val.Undef
+
+cStrS = Val.Unnamed . cStr
+strS  = Val.Unnamed . str
+
+-- unpacked struct constant
+-- | Construct a struct value.
+struct' :: [Val.Symbol] -> Val.Value
+struct' ss = Val.Constant (ustruct $ map ty ss) (Val.Struct ss)
+-- | Construct a struct symbol (unnamed value)
+struct :: [Val.Symbol] -> Val.Symbol
+struct = Val.Unnamed . struct'

@@ -48,6 +48,13 @@ size _ Ty.Fp128         = 128
 size ptrSize (Ty.Ptr{}) = ptrSize
 size _ t                = error $ "size not supported for " ++ show t
 
+-- unpacked struct
+ustruct :: [Ty.Ty] -> Ty.Ty
+ustruct = Ty.StructAnon False
+-- packed struct
+pstruct :: [Ty.Ty] -> Ty.Ty
+pstruct = Ty.StructAnon True
+
 -- type constructors for function types
 (-->) :: [Ty.Ty] -> Ty.Ty -> Ty.Ty
 ts --> t = Ty.Function False t ts

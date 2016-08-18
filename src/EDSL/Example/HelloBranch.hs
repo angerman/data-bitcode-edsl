@@ -7,6 +7,7 @@ import EDSL
 
 import Text.PrettyPrint (Doc)
 import Data.BitCode.LLVM.Pretty
+import Data.BitCode.LLVM.Classes.HasType (ty)
 import Data.Maybe
 
 import Data.BitCode.LLVM.Types (BasicBlockId)
@@ -103,6 +104,20 @@ binOpFun = mod "helloWorld"
         store slot (int32 4)
         ret =<< sub slot (int32 2)
   ]
+
+prefixDataFun = mod "prefixData"
+  [ withPrefixData prefix $
+    def "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> do
+      block "entry" $ do
+        -- obtain a pointer to the function
+        fp <- bitcast (ptr (ty prefix)) (fun "main" ([i32, ptr i8ptr] --> i32))
+        -- get the pointer to the data; and load it.
+        v <- gep fp [int32 (-1), int32 1] >>= load
+        strPtr <- gep (global "str" (cStr "prefix data value: %d\n")) [int32 0, int32 0]
+        ccall (fun "printf" (vararg $ [i8ptr] --> i32)) [strPtr, v]
+        ret (int32 0)
+  ]
+  where prefix = struct [(int32 1), (int32 10)]
 
 testWrite = writeModule "helloPtrFn.bc" helloPtrFn
 testWrite2 = writeModule "binOpFun.bc" binOpFun

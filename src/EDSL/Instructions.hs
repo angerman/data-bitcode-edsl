@@ -5,7 +5,7 @@ import EDSL.Types
 
 import Data.BitCode.LLVM.Classes.HasType
 
-import Data.BitCode.LLVM.Value (Value (Function, TRef), Symbol, symbolValue)
+import Data.BitCode.LLVM.Value (Value (Function, TRef, Constant), Named(Unnamed), Symbol, symbolValue)
 import Data.BitCode.LLVM.Types (BasicBlockId)
 import Data.BitCode.LLVM.Type  (Ty)
 import Data.BitCode.LLVM.Util
@@ -13,6 +13,7 @@ import Data.BitCode.LLVM.Instruction (Inst, TailCallKind)
 import Data.BitCode.LLVM.CallingConv (CallingConv)
 
 import qualified Data.BitCode.LLVM.Instruction     as Inst
+import qualified Data.BitCode.LLVM.Value           as Const (Const(..))
 import qualified Data.BitCode.LLVM.Type            as Ty
 import qualified Data.BitCode.LLVM.Cmp             as CmpOp
 import qualified Data.BitCode.LLVM.Opcodes.Binary  as BinOp
@@ -101,6 +102,47 @@ ashrI lhs rhs = mkBinOp BinOp.ASHR lhs rhs
 andI  lhs rhs = mkBinOp BinOp.AND  lhs rhs
 orI   lhs rhs = mkBinOp BinOp.OR   lhs rhs
 xorI  lhs rhs = mkBinOp BinOp.XOR  lhs rhs
+
+-- ** Constant Cast Op
+truncC, zextC, sextC, fpToUiC, fpToSiC, uiToFpC, siToFpC, fpTruncC, fpExtC, ptrToIntC, intToPtrC, bitcastC, addrSpCastC :: Ty -> Symbol -> Symbol
+truncC      t s = Unnamed . Constant t $ Const.Cast t CastOp.TRUNC s
+zextC       t s = Unnamed . Constant t $ Const.Cast t CastOp.ZEXT s
+sextC       t s = Unnamed . Constant t $ Const.Cast t CastOp.SEXT s
+fpToUiC     t s = Unnamed . Constant t $ Const.Cast t CastOp.FPTOUI s
+fpToSiC     t s = Unnamed . Constant t $ Const.Cast t CastOp.FPTOSI s
+uiToFpC     t s = Unnamed . Constant t $ Const.Cast t CastOp.UITOFP s
+siToFpC     t s = Unnamed . Constant t $ Const.Cast t CastOp.SITOFP s
+fpTruncC    t s = Unnamed . Constant t $ Const.Cast t CastOp.FPTRUNC s
+fpExtC      t s = Unnamed . Constant t $ Const.Cast t CastOp.FPEXT s
+ptrToIntC   t s | isPtr (ty s) = Unnamed . Constant t $ Const.Cast t CastOp.PTRTOINT s
+                | otherwise    = error . show $ text "Cannot ptr-to-int cast: " <+> pretty s <+> text "to" <+> pretty t <+> text ", symbol not a pointer!"
+intToPtrC   t s = Unnamed . Constant t $ Const.Cast t CastOp.INTTOPTR s
+bitcastC    t s = Unnamed . Constant t $ Const.Cast t CastOp.BITCAST s
+addrSpCastC t s = Unnamed . Constant t $ Const.Cast t CastOp.ADDRSPACECAST s
+
+-- ** Constant Binary Op
+addC, subC, mulC, udivC, sdivC, uremC, sremC, shlC, lshrC, ashrC, andC, orC, xorC :: Symbol -> Symbol -> Symbol
+mkConstBinOp :: BinOp.BinOp -> Symbol -> Symbol -> Symbol
+-- TODO: verify that both are Constants!
+mkConstBinOp op lhs rhs | ty lhs == ty rhs = Unnamed (Constant (ty lhs) $ Const.BinOp op lhs rhs)
+                        | otherwise = serror $ text "*** Type Error:" <+> (text ("BINOP (" ++ show op ++ "), types do not agree")
+                                                                           $+$ text "LHS:" <+> pretty lhs
+                                                                           $+$ text "RHS:" <+> pretty rhs)
+addC  lhs rhs = mkConstBinOp BinOp.ADD  lhs rhs
+subC  lhs rhs = mkConstBinOp BinOp.SUB  lhs rhs
+mulC  lhs rhs = mkConstBinOp BinOp.MUL  lhs rhs
+udivC lhs rhs = mkConstBinOp BinOp.UDIV lhs rhs
+sdivC lhs rhs = mkConstBinOp BinOp.SDIV lhs rhs
+uremC lhs rhs = mkConstBinOp BinOp.UREM lhs rhs
+sremC lhs rhs = mkConstBinOp BinOp.SREM lhs rhs
+shlC  lhs rhs = mkConstBinOp BinOp.SHL  lhs rhs
+lshrC lhs rhs = mkConstBinOp BinOp.LSHR lhs rhs
+ashrC lhs rhs = mkConstBinOp BinOp.ASHR lhs rhs
+andC  lhs rhs = mkConstBinOp BinOp.AND  lhs rhs
+orC   lhs rhs = mkConstBinOp BinOp.OR   lhs rhs
+xorC  lhs rhs = mkConstBinOp BinOp.XOR  lhs rhs
+
+
 
 
 --------------------------------------------------------------------------------
@@ -206,3 +248,4 @@ ashr lhs rhs = tellInst' $ ashrI lhs rhs
 and  lhs rhs = tellInst' $ andI  lhs rhs
 or   lhs rhs = tellInst' $ orI   lhs rhs
 xor  lhs rhs = tellInst' $ xorI  lhs rhs
+
