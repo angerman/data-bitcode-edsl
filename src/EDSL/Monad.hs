@@ -1,6 +1,7 @@
 {-# LANGUAGE LambdaCase, GeneralizedNewtypeDeriving #-}
 module EDSL.Monad
   (BodyBuilderT, BodyBuilder
+  , runBodyBuilderT
   , execBodyBuilderT
   , execBodyBuilder
   , tellInst
@@ -49,7 +50,7 @@ data FnCtx = FnCtx { nInst :: Int, nRef :: Int, nBlocks :: Int, blocks :: [Func.
 --           shiftR                        = (+)
 -- FnCtx -> (a, FnCtx)
 
-newtype BodyBuilderT m a = BodyBuilderT { runBodyBuilderT :: StateT FnCtx m a }
+newtype BodyBuilderT m a = BodyBuilderT { unBodyBuilderT :: StateT FnCtx m a }
   deriving (Functor, Applicative, Monad, MonadTrans, MonadFix, MonadIO)
 
 type BodyBuilder a = BodyBuilderT Identity a
@@ -60,11 +61,18 @@ getsCtx :: Monad m => (FnCtx -> a) -> BodyBuilderT m a
 getsCtx = BodyBuilderT . gets
 
 -- mapping over blocks
+runBodyBuilderT :: Monad m => Int -> BodyBuilderT m a -> m (a, [Func.BasicBlock])
+runBodyBuilderT instOffset = fmap (\(a, s) -> (a, reverseBlocks s)) . flip runStateT (FnCtx instOffset 0 0 mempty) . unBodyBuilderT
+  where
+    reverseBlocks :: FnCtx -> [Func.BasicBlock]
+    reverseBlocks = map (Func.bbmap reverse) . reverse . blocks
+
 execBodyBuilderT :: Monad m => Int -> BodyBuilderT m a -> m [Func.BasicBlock]
-execBodyBuilderT instOffset = fmap (map (Func.bbmap reverse) . reverse . blocks . snd) . flip runStateT (FnCtx instOffset 0 0 mempty) . runBodyBuilderT
+execBodyBuilderT instOffset = fmap snd . runBodyBuilderT instOffset
 
 execBodyBuilder :: Int -> BodyBuilderT Identity a -> [Func.BasicBlock]
 execBodyBuilder instOffset = runIdentity . execBodyBuilderT instOffset
+
 
 -- | Adds an instruction to a block.
 addInst :: Func.BasicBlock -> Func.BlockInst -> Func.BasicBlock

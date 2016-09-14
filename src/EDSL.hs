@@ -10,7 +10,7 @@ module EDSL
   , global, extGlobal
   , ghcfun, fun
   , block, block', block''
-  , def, defT
+  , def, defT, def_
   , ghcdef, ghcdefT
   , mod, mod'
   , writeModule
@@ -58,6 +58,9 @@ import Debug.Trace
 import Data.List (sort, nub)
 import Data.Maybe (fromMaybe)
 import Control.Applicative ((<|>))
+import Control.Monad.Trans.Class (lift)
+
+import Control.Monad.Trans.Except (ExceptT(..), runExceptT, throwE)
 
 -- | create a typed label to be resolved later.
 label :: String -> Ty.Ty -> Val.Symbol
@@ -78,39 +81,52 @@ ghcfun :: String -> Ty.Ty -> Val.Symbol
 ghcfun name sig = Val.Named name $ defFunction { Val.fType = ptr sig, Val.fIsProto = False, Val.fCallingConv = CallingConv.GHC }
 
 -- | BasicBlocks
-block'' :: Monad m => l -> BodyBuilderT m a -> BodyBuilderT m ((l, BasicBlockId), a)
+block'' :: Monad m => l -> EdslT m a -> EdslT m ((l, BasicBlockId), a)
 block'' name instructions = do
-  bbRef <- tellNewBlock
+  bbRef <- lift tellNewBlock
   ((name, bbRef),) <$> instructions
 
-block' :: Monad m => l -> BodyBuilderT m a -> BodyBuilderT m (l, BasicBlockId)
+block' :: Monad m => l -> EdslT m a -> EdslT m (l, BasicBlockId)
 block' name instructions = fst <$> block'' name instructions
 
-block :: Monad m => l -> BodyBuilderT m a -> BodyBuilderT m BasicBlockId
+block :: Monad m => l -> EdslT m a -> EdslT m BasicBlockId
 block l = fmap snd . block' l
 
 -- | Function definition
 defT :: Monad m
      => String                             -- ^ The name of the function
      -> Ty.Ty                              -- ^ The function signature ([x] --> y)
-     -> ([Val.Symbol] -> BodyBuilderT m a) -- ^ The body generator (symbols are references to the functions arguments)
-     -> m Func.Function
-defT name sig body = Func.Function (Val.Named name $ defFunction { Val.fType = ptr sig, Val.fIsProto = False}) [] <$> execBodyBuilderT 0 (body args)
+     -> ([Val.Symbol] -> EdslT m a)        -- ^ The body generator (symbols are references to the functions arguments)
+     -> ExceptT Error m Func.Function
+defT name sig body = ExceptT $ runBodyBuilderT' 0 $ runExceptT (body args)
   where args = map Val.Unnamed $ zipWith Val.Arg (Ty.teParamTy sig) [0..]
+        mkFunc :: [Func.BasicBlock] -> Func.Function
+        mkFunc = Func.Function (Val.Named name $ defFunction { Val.fType = ptr sig, Val.fIsProto = False}) []
+        runBodyBuilderT' :: (Monad m, Functor f) => Int -> BodyBuilderT m (f a) -> m (f Func.Function)
+        runBodyBuilderT' i = fmap (\(a, s) -> fmap (const (mkFunc s)) a) . runBodyBuilderT i
 
-def :: String -> Ty.Ty -> ([Val.Symbol] -> BodyBuilder a) -> Func.Function
-def name sig = runIdentity . defT name sig
+def :: String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Either Error Func.Function
+def name sig = runIdentity . runExceptT .  defT name sig
+
+def_ :: String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Func.Function
+def_ name sig body = case def name sig body of
+  Left e -> error e
+  Right f -> f
 
 ghcdefT :: Monad m
         => String
         -> Ty.Ty
-        -> ([Val.Symbol] -> BodyBuilderT m a)
-        -> m Func.Function
-ghcdefT name sig body = Func.Function (Val.Named name $ defFunction { Val.fType = ptr sig, Val.fIsProto = False, Val.fCallingConv = CallingConv.GHC }) [] <$> execBodyBuilderT 0 (body args)
+        -> ([Val.Symbol] -> EdslT m a)
+        -> ExceptT Error m Func.Function
+ghcdefT name sig body = ExceptT $ runBodyBuilderT' 0 $ runExceptT (body args)
   where args = map Val.Unnamed $ zipWith Val.Arg (Ty.teParamTy sig) [0..]
+        mkFunc :: [Func.BasicBlock] -> Func.Function
+        mkFunc = Func.Function (Val.Named name $ defFunction { Val.fType = ptr sig, Val.fIsProto = False, Val.fCallingConv = CallingConv.GHC }) []
+        runBodyBuilderT' :: (Monad m, Functor f) => Int -> BodyBuilderT m (f a) -> m (f Func.Function)
+        runBodyBuilderT' i = fmap (\(a, s) -> fmap (const (mkFunc s)) a) . runBodyBuilderT i
 
-ghcdef :: String -> Ty.Ty -> ([Val.Symbol] -> BodyBuilder a) -> Func.Function
-ghcdef name sig = runIdentity . ghcdefT name sig
+ghcdef :: String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Either Error Func.Function
+ghcdef name sig = runIdentity . runExceptT . ghcdefT name sig
 
 -- | Prefix Data
 withPrefixData :: Val.Symbol -> Func.Function -> Func.Function

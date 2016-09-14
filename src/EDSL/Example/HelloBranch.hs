@@ -20,7 +20,7 @@ pp = pretty
 
 
 helloBranch = mod "helloWorld"
-  [ def "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+  [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
       block "entry" $ do
         cond <- argc `iugt` int32 1
         br cond one two
@@ -37,7 +37,7 @@ helloBranch = mod "helloWorld"
 
 lookup_ k = fromMaybe (fail "not found") . fmap pure . lookup k
 
-genBlock :: [(String, BasicBlockId)] -> String -> BodyBuilder (String, BasicBlockId)
+genBlock :: [(String, BasicBlockId)] -> String -> Edsl (String, BasicBlockId)
 genBlock idMap str = block' str $ do
   strPtr <- gep (global str (cStr str)) [int32 0, int32 0]
   ccall (fun "puts" ([i8ptr] --> i32)) [strPtr]
@@ -45,13 +45,13 @@ genBlock idMap str = block' str $ do
 
 
 helloBranch2 = mod "helloWorld"
-  [ def "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+  [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
       idMap <- (++) <$> (mapM (genBlock idMap) ["foo", "bar", "baz"]) <*> ((:[]) <$> (block' "end" (ret (int32 0))))
       pure ()
   ]
 
 helloPtrFn = mod "helloWorld"
-  [ def "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+  [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
       let sig = [i8ptr] --> i32
       block "entry" $ do
         -- obtain a slot to store an int32
@@ -82,7 +82,7 @@ helloPtrFn = mod "helloWorld"
   ]
 
 helloWorld = mod "helloWorld"
-  [ def "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> do
+  [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
         strPtr <- gep (global "foo" (cStr "hello world\n")) [int32 0, int32 0]
         ccall (fun "printf" (vararg $ [i8ptr] --> i32)) [strPtr]
@@ -90,7 +90,7 @@ helloWorld = mod "helloWorld"
   ]
 
 gepFun = mod "helloWorld"
-  [ def "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> do
+  [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
         p <- gep argv [int32 0]
         strPtr <- gep (global "foo" (cStr "hello world\n")) [int32 0, int32 0]
@@ -98,7 +98,7 @@ gepFun = mod "helloWorld"
   ]
 
 binOpFun = mod "helloWorld"
-  [ def "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> do
+  [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
         slot <- alloca i32 (int32 1)
         store slot (int32 4)
@@ -107,7 +107,7 @@ binOpFun = mod "helloWorld"
 
 prefixDataFun = mod "prefixData"
   [ withPrefixData prefix $
-    def "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> do
+    def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
         -- obtain a pointer to the function
         fp <- bitcast (ptr (ty prefix)) (fun "main" ([i32, ptr i8ptr] --> i32))
