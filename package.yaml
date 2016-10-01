@@ -12,6 +12,7 @@ github: angerman/bitcode-playground
 dependencies:
   - base >= 4.7 && < 5
   - pretty >= 1.1
+  - binary >= 0.8
   - bytestring >= 0.10
   - base16-bytestring
   - data-bitcode

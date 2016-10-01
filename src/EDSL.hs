@@ -14,6 +14,7 @@ module EDSL
   , ghcdef, ghcdefT
   , mod, mod'
   , writeModule
+  , dumpModuleBitcodeAST
   , withPrefixData
   , label
   )
@@ -61,6 +62,8 @@ import Control.Applicative ((<|>))
 import Control.Monad.Trans.Class (lift)
 
 import Control.Monad.Trans.Except (ExceptT(..), runExceptT, throwE)
+
+import Data.Binary (encodeFile)
 
 -- | create a typed label to be resolved later.
 label :: String -> Ty.Ty -> Val.Symbol
@@ -234,6 +237,9 @@ mod' name modGlobals fns = Module
 -- I/O
 writeModule :: FilePath -> Module -> IO ()
 writeModule f = writeFile f . withHeader True . emitTopLevel . map denormalize . toBitCode . (Just (Ident "Data.BitCode.LLVM" Current),)
+
+dumpModuleBitcodeAST :: FilePath -> Module -> IO ()
+dumpModuleBitcodeAST f = encodeFile f . map denormalize . toBitCode . (Just (Ident "Data.BitCode.LLVM" Current),)
 
 --------------------------------------------------------------------------------
 -- Predicates
