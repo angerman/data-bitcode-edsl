@@ -1,3 +1,4 @@
+
 module EDSL.Instructions where
 
 import Prelude hiding (error)
@@ -225,7 +226,9 @@ gep s = tellInst'' . gepI s
 -- ** Cast
 trunc, zext, sext, fpToUi, fpToSi, uiToFp, siToFp, fpTrunc, fpExt, ptrToInt, intToPtr, bitcast, addrSpCast :: Monad m => Ty -> Symbol -> EdslT m Symbol
 trunc t = tellInst'' . truncI t
-zext t = tellInst'' . zextI t
+zext t s | ty s /= t = tellInst'' (zextI t s)
+         -- LLVM will complain if this kind of cast appears in the bitcode; it considers the module broken.
+         | otherwise = sthrowE $ text "Cannot zero extend cast:" <+> pretty s <+> text "to" <+> pretty t <> text "."
 sext t = tellInst'' . sextI t
 fpToUi t = tellInst'' . fpToUiI t
 fpToSi t = tellInst'' . fpToSiI t
@@ -234,9 +237,9 @@ siToFp t = tellInst'' . siToFpI t
 fpTrunc t = tellInst'' . fpTruncI t
 fpExt t = tellInst'' . fpExtI t
 ptrToInt t s | isPtr (ty s) = tellInst'' (ptrToIntI t s)
-             | otherwise    = sthrowE $ text "Cannot ptr-to-int cast: " <+> pretty s <+> text "to" <+> pretty t <+> text ", symbol not a pointer!"
+             | otherwise    = sthrowE $ text "Cannot ptr-to-int cast:" <+> pretty s <+> text "to" <+> pretty t <> text ", symbol not a pointer!"
 intToPtr t s | isInt (ty s) = tellInst'' (intToPtrI t s)
-             | otherwise    = sthrowE $ text "Cannot int-to-ptr cast: " <+> pretty s <+> text "to" <+> pretty t <+> text ", symbol not an integer!"
+             | otherwise    = sthrowE $ text "Cannot int-to-ptr cast:" <+> pretty s <+> text "to" <+> pretty t <> text ", symbol not an integer!"
 bitcast t = tellInst'' . bitcastI t
 addrSpCast t = tellInst'' . addrSpCastI t
 
