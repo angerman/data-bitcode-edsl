@@ -14,6 +14,10 @@ import Data.BitCode.LLVM.Type  (Ty)
 import Data.BitCode.LLVM.Util  hiding (lift)
 import Data.BitCode.LLVM.Instruction (TailCallKind)
 import Data.BitCode.LLVM.CallingConv (CallingConv)
+import Data.BitCode.LLVM.RMWOperations (RMWOperations)
+import Data.BitCode.LLVM.Codes.AtomicOrdering (AtomicOrdering)
+import Data.BitCode.LLVM.Codes.SynchronizationScope (AtomicSynchScope)
+
 
 import qualified Data.BitCode.LLVM.Instruction     as Inst
 import qualified Data.BitCode.LLVM.Value           as Const (Const(..))
@@ -23,6 +27,7 @@ import qualified Data.BitCode.LLVM.Opcodes.Binary  as BinOp
 import qualified Data.BitCode.LLVM.Opcodes.Cast    as CastOp
 import qualified Data.BitCode.LLVM.CallingConv     as CConv
 import qualified Data.BitCode.LLVM.Util            as Util
+import qualified Data.BitCode.LLVM.RMWOperations   as RMWOp
 
 import Data.BitCode.LLVM.Pretty
 import Text.PrettyPrint
@@ -122,6 +127,39 @@ ashrI lhs rhs = mkBinOp BinOp.ASHR lhs rhs
 andI  lhs rhs = mkBinOp BinOp.AND  lhs rhs
 orI   lhs rhs = mkBinOp BinOp.OR   lhs rhs
 xorI  lhs rhs = mkBinOp BinOp.XOR  lhs rhs
+
+-- ** Atomic Op
+
+atomicLoadI :: Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
+atomicLoadI s o ss = pure $ Inst.AtomicLoad (lower (ty s)) s 0 o ss
+atomicStoreI :: {- target: -} Symbol -> {- source: -} Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
+atomicStoreI t s o ss | lower (ty t) == ty s = pure $ Inst.AtomicStore t s 0 o ss
+                      | otherwise = Left $ "can not atomic store " ++ (show (pretty s)) ++ " in " ++ (show (pretty t))
+cmpXchgI :: Symbol -> Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> AtomicOrdering -> Inst
+cmpXchgI ptr cmp val ord scope failOrd | lower (ty ptr) == ty cmp && ty cmp == ty val = pure $ Inst.CmpXchg ptr cmp val ord scope failOrd
+                                       | otherwise = serror $ text "*** TypeError:" <+> (text ("cmpXchg, types do not agree")
+                                                                                         $+$ text "PTR: " <+> pretty ptr
+                                                                                         $+$ text "CMP: " <+> pretty cmp
+                                                                                         $+$ text "VAL: " <+> pretty val)
+
+mkAtomicRMWOp :: RMWOperations -> Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
+mkAtomicRMWOp op lhs rhs ord scope | lower (ty lhs) == ty rhs = pure $ Inst.AtomicRMW lhs rhs op ord scope
+                                   | otherwise = serror $ text "*** Type Error:" <+> (text ("AtomicRMW (" ++ show op ++ "), types do not agree")
+                                                                                     $+$ text "PTR: " <+> pretty lhs
+                                                                                     $+$ text "VAL: " <+> pretty rhs)
+
+atomicXchgI, atomicAddI, atomicSubI, atomicAndI, atomicNandI, atomicOrI, atomicXorI, atomicMaxI, atomicMinI, atomicUmaxI, atomicUminI :: Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
+atomicXchgI lhs rhs ord scope = mkAtomicRMWOp RMWOp.XCHG lhs rhs ord scope
+atomicAddI  lhs rhs ord scope = mkAtomicRMWOp RMWOp.ADD  lhs rhs ord scope
+atomicSubI  lhs rhs ord scope = mkAtomicRMWOp RMWOp.SUB  lhs rhs ord scope
+atomicAndI  lhs rhs ord scope = mkAtomicRMWOp RMWOp.AND  lhs rhs ord scope
+atomicNandI lhs rhs ord scope = mkAtomicRMWOp RMWOp.NAND lhs rhs ord scope
+atomicOrI   lhs rhs ord scope = mkAtomicRMWOp RMWOp.OR   lhs rhs ord scope
+atomicXorI  lhs rhs ord scope = mkAtomicRMWOp RMWOp.XOR  lhs rhs ord scope
+atomicMaxI  lhs rhs ord scope = mkAtomicRMWOp RMWOp.MAX  lhs rhs ord scope
+atomicMinI  lhs rhs ord scope = mkAtomicRMWOp RMWOp.MIN  lhs rhs ord scope
+atomicUmaxI lhs rhs ord scope = mkAtomicRMWOp RMWOp.UMAX lhs rhs ord scope
+atomicUminI lhs rhs ord scope = mkAtomicRMWOp RMWOp.UMIN lhs rhs ord scope
 
 -- ** Constant Cast Op
 truncC, zextC, sextC, fpToUiC, fpToSiC, uiToFpC, siToFpC, fpTruncC, fpExtC, ptrToIntC, intToPtrC, bitcastC, addrSpCastC :: Ty -> Symbol -> Either Error Symbol
@@ -271,3 +309,25 @@ and  lhs rhs = tellInst'' $ andI  lhs rhs
 or   lhs rhs = tellInst'' $ orI   lhs rhs
 xor  lhs rhs = tellInst'' $ xorI  lhs rhs
 
+-- ** Atomic Op
+atomicLoad :: Monad m => Symbol -> AtomicOrdering -> AtomicSynchScope -> EdslT m Symbol
+atomicLoad s o ss | isPtr (ty s) = tellInst'' (atomicLoadI s o ss)
+                  | otherwise    = sthrowE $ text "Cannot atomic load:" <+> pretty s <+> text "must be of pointer type!"
+atomicStore :: Monad m => Symbol -> Symbol -> AtomicOrdering AtomicSynchScope -> EdslT m ()
+atomicStore s t o ss = exceptT (atomicStoreI s t o ss) >>= lift . tellInst >> pure ()
+
+cmpXchg :: Monad m => Symbol -> Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> AtomicOrdering -> EdslT m Symbol
+cmpXchg ptr cmp val ord scope failOrd = tellInst'' $ cmpXchgI ptr cmp val ord scope failOrd
+
+atomicXchg, atomicAdd, atomicSub, atomicNand, atomicOr, atomicXor, atomicMax, atomicMin, atomicUmax, atomicUmin :: Monad m => Symbol -> Symbol -> AtomicOrdering AtomicSynchScope -> EdslT m Symbol
+atomicXchg lhs rhs ord scope = tellInst'' $ atomicXchgI lhs rhs ord scope
+atomicAdd  lhs rhs ord scope = tellInst'' $ atomicAddI  lhs rhs ord scope
+atomicSub  lhs rhs ord scope = tellInst'' $ atomicSubI  lhs rhs ord scope
+atomicAnd  lhs rhs ord scope = tellInst'' $ atomicAndI  lhs rhs ord scope
+atomicNand lhs rhs ord scope = tellInst'' $ atomicNandI lhs rhs ord scope
+atomicOr   lhs rhs ord scope = tellInst'' $ atomicOrI   lhs rhs ord scope
+atomicXor  lhs rhs ord scope = tellInst'' $ atomicXorI  lhs rhs ord scope
+atomicMax  lhs rhs ord scope = tellInst'' $ atomicMaxI  lhs rhs ord scope
+atomicMin  lhs rhs ord scope = tellInst'' $ atomicMinI  lhs rhs ord scope
+atomicUmax lhs rhs ord scope = tellInst'' $ atomicUmaxI lhs rhs ord scope
+atomicUmin lhs rhs ord scope = tellInst'' $ atomicUminI lhs rhs ord scope
