@@ -36,6 +36,9 @@ import Control.Monad.Trans.Class (MonadTrans, lift)
 import Control.Monad.Trans.Except (ExceptT(..), throwE)
 import Control.Monad ((<=<), (>=>))
 import Data.Functor.Identity (Identity)
+
+import GHC.Stack
+
 type Error = String
 type Inst = Either Error Inst.Inst
 
@@ -43,40 +46,48 @@ type EdslT m a = ExceptT Error (BodyBuilderT m) a
 type Edsl a = ExceptT Error (BodyBuilderT Identity) a
 
 serror = Left . show
-exceptT :: (Monad m) => Either e a -> ExceptT e m a
-exceptT = ExceptT . pure
+exceptT :: Monad m => Either Error a -> EdslT m a
+exceptT res = case res of
+  r@(Right{}) -> ExceptT (pure r)
+  (Left errMsg) -> do
+    log <- lift askLog
+    ExceptT (pure . Left $ unlines ["LOG", log, "ERROR", errMsg])
+
 sthrowE :: (Monad m, Show a) => a -> ExceptT Error m b
 sthrowE = throwE . show
 
 -- * Instructions
-allocaI :: Ty -> Symbol -> Inst
+allocaI :: HasCallStack => Ty -> Symbol -> Inst
 allocaI t s = pure $ Inst.Alloca (Util.lift t) s 0 -- we want to allocate space for t, and hence want a (ptr t) to be returned.
-loadI :: Symbol -> Inst
+loadI :: HasCallStack => Symbol -> Inst
 loadI s = pure $ Inst.Load (lower (ty s)) s 0
-storeI :: Symbol -- ^ target (e.g where)
+storeI :: HasCallStack => Symbol -- ^ target (e.g where)
        -> Symbol -- ^ source (e.g. what)
        -> Inst
-storeI t s | lower (ty t) == ty s = pure $ Inst.Store t s 0
+storeI t s | not (isPtr (ty t))   = Left $ "can not store " ++ (show (pretty s)) ++ " in " ++ (show (pretty t)) ++ ". Target " ++ (show (pretty t)) ++ " must be of ptr type."
+           | lower (ty t) == ty s = pure $ Inst.Store t s 0
            | otherwise = Left $ "can not store " ++ (show (pretty s)) ++ " in " ++ (show (pretty t))
-callI :: TailCallKind -> CallingConv -> Ty -> Symbol -> [Symbol] -> Inst
+callI :: HasCallStack => TailCallKind -> CallingConv -> Ty -> Symbol -> [Symbol] -> Inst
 callI tck cc t f args | isPtr t = pure $ Inst.Call (funRetTy t) tck cc f t args
                       | otherwise = Left "call expects ptr type"
-retI :: Symbol -> Inst
+retI :: HasCallStack => Symbol -> Inst
 retI = pure . Inst.Ret . Just
-retVoidI :: Inst
+retVoidI :: HasCallStack => Inst
 retVoidI = pure $ Inst.Ret Nothing
-ubrI :: BasicBlockId -> Inst
+ubrI :: HasCallStack => BasicBlockId -> Inst
 ubrI = pure . Inst.UBr
-brI :: Symbol -> BasicBlockId -> BasicBlockId -> Inst
+brI :: HasCallStack => Symbol -> BasicBlockId -> BasicBlockId -> Inst
 brI s b b' = pure $ Inst.Br s b b'
-switchI :: Symbol -> BasicBlockId -> [(Symbol, BasicBlockId)] -> Inst
+switchI :: HasCallStack => Symbol -> BasicBlockId -> [(Symbol, BasicBlockId)] -> Inst
 switchI c def cases = pure $ Inst.Switch c def cases
-gepI :: Symbol -> [Symbol] -> Inst
+gepI :: HasCallStack => Symbol -> [Symbol] -> Inst
 gepI s = pure . Inst.Gep (ty s) True s
+extractValueI :: HasCallStack => Symbol -> [Symbol] -> Inst
+extractValueI s = pure . Inst.ExtractValue (ty s) s
 
 -- ** Cast
 -- TODO: support FCMP as well.
-truncI, zextI, sextI, fpToUiI, fpToSiI, uiToFpI, siToFpI, fpTruncI, fpExtI, ptrToIntI, intToPtrI, bitcastI, addrSpCastI :: Ty -> Symbol -> Inst
+truncI, zextI, sextI, fpToUiI, fpToSiI, uiToFpI, siToFpI, fpTruncI, fpExtI, ptrToIntI, intToPtrI, bitcastI, addrSpCastI :: HasCallStack => Ty -> Symbol -> Inst
 truncI      t s = pure $ Inst.Cast t CastOp.TRUNC s
 zextI       t s = pure $ Inst.Cast t CastOp.ZEXT s
 sextI       t s = pure $ Inst.Cast t CastOp.SEXT s
@@ -91,7 +102,7 @@ intToPtrI   t s = pure $ Inst.Cast t CastOp.INTTOPTR s
 bitcastI    t s = pure $ Inst.Cast t CastOp.BITCAST s
 addrSpCastI t s = pure $ Inst.Cast t CastOp.ADDRSPACECAST s
 -- ** Compare
-ieqI, ineqI, iugtI, iugeI, iultI, iuleI, isgtI, isgeI, isltI, isleI :: Symbol -> Symbol -> Inst
+ieqI, ineqI, iugtI, iugeI, iultI, iuleI, isgtI, isgeI, isltI, isleI :: HasCallStack => Symbol -> Symbol -> Inst
 mkCmp2 op lhs rhs | ty lhs == ty rhs = pure $  Inst.Cmp2 i1 lhs rhs op
                   | otherwise = serror $ text "*** Type Error:" <+> (text ("CMP2 (" ++ show op ++ "), types do not agree")
                                                                      $+$ text "LHS:" <+> pretty lhs
@@ -107,8 +118,8 @@ isgeI lhs rhs = mkCmp2 CmpOp.ICMP_SGE lhs rhs
 isltI lhs rhs = mkCmp2 CmpOp.ICMP_SLT lhs rhs
 isleI lhs rhs = mkCmp2 CmpOp.ICMP_SLE lhs rhs
 -- ** Binary Op
-addI, subI, mulI, udivI, sdivI, uremI, sremI, shlI, lshrI, ashrI, andI, orI, xorI :: Symbol -> Symbol -> Inst
-mkBinOp :: BinOp.BinOp -> Symbol -> Symbol -> Inst
+addI, subI, mulI, udivI, sdivI, uremI, sremI, shlI, lshrI, ashrI, andI, orI, xorI :: HasCallStack => Symbol -> Symbol -> Inst
+mkBinOp :: HasCallStack => BinOp.BinOp -> Symbol -> Symbol -> Inst
 mkBinOp op lhs rhs | ty lhs == ty rhs = pure $ Inst.BinOp (ty lhs) op lhs rhs []
                    | otherwise = serror $ text "*** Type Error:" <+> (text ("BINOP (" ++ show op ++ "), types do not agree")
                                                                       $+$ text "LHS:" <+> pretty lhs
@@ -130,25 +141,25 @@ xorI  lhs rhs = mkBinOp BinOp.XOR  lhs rhs
 
 -- ** Atomic Op
 
-atomicLoadI :: Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
+atomicLoadI :: HasCallStack => Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
 atomicLoadI s o ss = pure $ Inst.AtomicLoad (lower (ty s)) s 0 o ss
-atomicStoreI :: {- target: -} Symbol -> {- source: -} Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
+atomicStoreI :: HasCallStack => {- target: -} Symbol -> {- source: -} Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
 atomicStoreI t s o ss | lower (ty t) == ty s = pure $ Inst.AtomicStore t s 0 o ss
                       | otherwise = Left $ "can not atomic store " ++ (show (pretty s)) ++ " in " ++ (show (pretty t))
-cmpXchgI :: Symbol -> Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> AtomicOrdering -> Inst
+cmpXchgI :: HasCallStack => Symbol -> Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> AtomicOrdering -> Inst
 cmpXchgI ptr cmp val ord scope failOrd | lower (ty ptr) == ty cmp && ty cmp == ty val = pure $ Inst.CmpXchg ptr cmp val ord scope failOrd
                                        | otherwise = serror $ text "*** TypeError:" <+> (text ("cmpXchg, types do not agree")
                                                                                          $+$ text "PTR: " <+> pretty ptr
                                                                                          $+$ text "CMP: " <+> pretty cmp
                                                                                          $+$ text "VAL: " <+> pretty val)
 
-mkAtomicRMWOp :: RMWOperations -> Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
+mkAtomicRMWOp :: HasCallStack => RMWOperations -> Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
 mkAtomicRMWOp op lhs rhs ord scope | lower (ty lhs) == ty rhs = pure $ Inst.AtomicRMW lhs rhs op ord scope
                                    | otherwise = serror $ text "*** Type Error:" <+> (text ("AtomicRMW (" ++ show op ++ "), types do not agree")
                                                                                      $+$ text "PTR: " <+> pretty lhs
                                                                                      $+$ text "VAL: " <+> pretty rhs)
 
-atomicXchgI, atomicAddI, atomicSubI, atomicAndI, atomicNandI, atomicOrI, atomicXorI, atomicMaxI, atomicMinI, atomicUmaxI, atomicUminI :: Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
+atomicXchgI, atomicAddI, atomicSubI, atomicAndI, atomicNandI, atomicOrI, atomicXorI, atomicMaxI, atomicMinI, atomicUmaxI, atomicUminI :: HasCallStack => Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
 atomicXchgI lhs rhs ord scope = mkAtomicRMWOp RMWOp.XCHG lhs rhs ord scope
 atomicAddI  lhs rhs ord scope = mkAtomicRMWOp RMWOp.ADD  lhs rhs ord scope
 atomicSubI  lhs rhs ord scope = mkAtomicRMWOp RMWOp.SUB  lhs rhs ord scope
@@ -162,7 +173,7 @@ atomicUmaxI lhs rhs ord scope = mkAtomicRMWOp RMWOp.UMAX lhs rhs ord scope
 atomicUminI lhs rhs ord scope = mkAtomicRMWOp RMWOp.UMIN lhs rhs ord scope
 
 -- ** Constant Cast Op
-truncC, zextC, sextC, fpToUiC, fpToSiC, uiToFpC, siToFpC, fpTruncC, fpExtC, ptrToIntC, intToPtrC, bitcastC, addrSpCastC :: Ty -> Symbol -> Either Error Symbol
+truncC, zextC, sextC, fpToUiC, fpToSiC, uiToFpC, siToFpC, fpTruncC, fpExtC, ptrToIntC, intToPtrC, bitcastC, addrSpCastC :: HasCallStack => Ty -> Symbol -> Either Error Symbol
 truncC      t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.TRUNC s
 zextC       t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.ZEXT s
 sextC       t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.SEXT s
@@ -179,8 +190,8 @@ bitcastC    t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.BITCAST s
 addrSpCastC t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.ADDRSPACECAST s
 
 -- ** Constant Binary Op
-addC, subC, mulC, udivC, sdivC, uremC, sremC, shlC, lshrC, ashrC, andC, orC, xorC :: Symbol -> Symbol -> Either Error Symbol
-mkConstBinOp :: BinOp.BinOp -> Symbol -> Symbol -> Either Error Symbol
+addC, subC, mulC, udivC, sdivC, uremC, sremC, shlC, lshrC, ashrC, andC, orC, xorC :: HasCallStack => Symbol -> Symbol -> Either Error Symbol
+mkConstBinOp :: HasCallStack => BinOp.BinOp -> Symbol -> Symbol -> Either Error Symbol
 -- TODO: verify that both are Constants!
 mkConstBinOp op lhs rhs | ty lhs == ty rhs = pure $ Unnamed (Constant (ty lhs) $ Const.BinOp op lhs rhs)
                         | otherwise = serror $ text "*** Type Error:" <+> (text ("BINOP (" ++ show op ++ "), types do not agree")
@@ -205,18 +216,18 @@ xorC  lhs rhs = mkConstBinOp BinOp.XOR  lhs rhs
 -- | Intructions
 tellInst'' x = exceptT x >>= lift . tellInst'
 
-alloca :: Monad m => Ty -> Symbol -> EdslT m Symbol
+alloca :: (HasCallStack, Monad m) => Ty -> Symbol -> EdslT m Symbol
 alloca ty size = tellInst'' (allocaI ty size)
 
-load :: Monad m => Symbol -> EdslT m Symbol
+load :: (HasCallStack, Monad m) => Symbol -> EdslT m Symbol
 load s | isPtr (ty s) = tellInst'' (loadI s)
        | otherwise    = sthrowE $ text "Cannlot load:" <+> pretty s <+> text "must be of pointer type!"
-store :: Monad m
+store :: (HasCallStack, Monad m)
       => Symbol -- ^ Source
       -> Symbol -- ^ Target
       -> EdslT m ()
 store source target = exceptT (storeI source target) >>= lift . tellInst >> pure ()
-call' :: Monad m => TailCallKind -> CallingConv -> Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
+call' :: (HasCallStack, Monad m) => TailCallKind -> CallingConv -> Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
 call' tck cc f args
   | not . isFunctionPtr . ty $ f
   = sthrowE $ text "Cannot call: " <+> pretty f <+> text "must be a function pointer."
@@ -261,6 +272,9 @@ switch :: Monad m => Symbol -> BasicBlockId -> [(Symbol, BasicBlockId)] -> EdslT
 switch cond def cases = lift . tellInst =<< exceptT (switchI cond def cases)
 gep :: Monad m => Symbol -> [Symbol] -> EdslT m Symbol
 gep s = tellInst'' . gepI s
+extractValue :: (HasCallStack, Monad m) => Symbol -> [Symbol] -> EdslT m Symbol
+extractValue s = tellInst'' . extractValueI s
+
 -- ** Cast
 trunc, zext, sext, fpToUi, fpToSi, uiToFp, siToFp, fpTrunc, fpExt, ptrToInt, intToPtr, bitcast, addrSpCast :: Monad m => Ty -> Symbol -> EdslT m Symbol
 trunc t = tellInst'' . truncI t
@@ -313,13 +327,13 @@ xor  lhs rhs = tellInst'' $ xorI  lhs rhs
 atomicLoad :: Monad m => Symbol -> AtomicOrdering -> AtomicSynchScope -> EdslT m Symbol
 atomicLoad s o ss | isPtr (ty s) = tellInst'' (atomicLoadI s o ss)
                   | otherwise    = sthrowE $ text "Cannot atomic load:" <+> pretty s <+> text "must be of pointer type!"
-atomicStore :: Monad m => Symbol -> Symbol -> AtomicOrdering AtomicSynchScope -> EdslT m ()
+atomicStore :: Monad m => Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> EdslT m ()
 atomicStore s t o ss = exceptT (atomicStoreI s t o ss) >>= lift . tellInst >> pure ()
 
 cmpXchg :: Monad m => Symbol -> Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> AtomicOrdering -> EdslT m Symbol
 cmpXchg ptr cmp val ord scope failOrd = tellInst'' $ cmpXchgI ptr cmp val ord scope failOrd
 
-atomicXchg, atomicAdd, atomicSub, atomicNand, atomicOr, atomicXor, atomicMax, atomicMin, atomicUmax, atomicUmin :: Monad m => Symbol -> Symbol -> AtomicOrdering AtomicSynchScope -> EdslT m Symbol
+atomicXchg, atomicAdd, atomicSub, atomicNand, atomicOr, atomicXor, atomicMax, atomicMin, atomicUmax, atomicUmin :: Monad m => Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> EdslT m Symbol
 atomicXchg lhs rhs ord scope = tellInst'' $ atomicXchgI lhs rhs ord scope
 atomicAdd  lhs rhs ord scope = tellInst'' $ atomicAddI  lhs rhs ord scope
 atomicSub  lhs rhs ord scope = tellInst'' $ atomicSubI  lhs rhs ord scope

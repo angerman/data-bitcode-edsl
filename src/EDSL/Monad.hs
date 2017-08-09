@@ -7,6 +7,9 @@ module EDSL.Monad
   , tellInst
   , tellInst'
   , tellNewBlock
+  , tellLog
+  , tellLogShow
+  , askLog
   )
   where
 
@@ -33,7 +36,7 @@ import Control.Monad.Trans.Class
 -- and we need to provide some form of unique symbol supply
 -- the simples being a counter.
 
-data FnCtx = FnCtx { nInst :: Int, nRef :: Int, nBlocks :: Int, blocks :: [Func.BasicBlock] } deriving Show
+data FnCtx = FnCtx { nInst :: Int, nRef :: Int, nBlocks :: Int, blocks :: [Func.BasicBlock], _log :: [String] } deriving Show
 -- instance Monoid FnCtx where
 --   mempty = FnCtx 0 0 mempty
 --   (FnCtx is bs bbs) `mappend` (FnCtx is' bs' bbs') = FnCtx (is + is') (bs + bs') (bbs `mappend` shift is bs bbs')
@@ -62,7 +65,7 @@ getsCtx = BodyBuilderT . gets
 
 -- mapping over blocks
 runBodyBuilderT :: Monad m => Int -> BodyBuilderT m a -> m (a, [Func.BasicBlock])
-runBodyBuilderT instOffset = fmap (\(a, s) -> (a, reverseBlocks s)) . flip runStateT (FnCtx instOffset 0 0 mempty) . unBodyBuilderT
+runBodyBuilderT instOffset = fmap (\(a, s) -> (a, reverseBlocks s)) . flip runStateT (FnCtx instOffset 0 0 mempty mempty) . unBodyBuilderT
   where
     reverseBlocks :: FnCtx -> [Func.BasicBlock]
     reverseBlocks = map (Func.bbmap reverse) . reverse . blocks
@@ -78,6 +81,15 @@ execBodyBuilder instOffset = runIdentity . execBodyBuilderT instOffset
 addInst :: Func.BasicBlock -> Func.BlockInst -> Func.BasicBlock
 addInst (Func.BasicBlock is) i = (Func.BasicBlock (i:is))
 addInst (Func.NamedBlock n is) i = (Func.NamedBlock n (i:is))
+
+tellLog :: Monad m => String -> BodyBuilderT m ()
+tellLog l = modifyCtx (\c -> c { _log = l:(_log c) })
+
+tellLogShow :: (Monad m, Show s) => s -> BodyBuilderT m () 
+tellLogShow = tellLog . show
+
+askLog :: Monad m => BodyBuilderT m String
+askLog = unlines . fmap ('\t':) . reverse <$> getsCtx _log
 
 -- | Add an instruction to the current block.
 -- returns @Just ref@ if the instruction retuns
