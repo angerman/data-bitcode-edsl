@@ -21,3 +21,6 @@ cabal.project.local
 *.ll
 a.out
 data/
+GNUmakefile
+ghc.mk
+.ghc.environment.*
