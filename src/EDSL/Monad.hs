@@ -7,6 +7,8 @@ module EDSL.Monad
   , tellInst
   , tellInst'
   , tellNewBlock
+  -- * Debugging
+  , askInsts
   , tellLog
   , tellLogShow
   , askLog
@@ -36,7 +38,7 @@ import Control.Monad.Trans.Class
 -- and we need to provide some form of unique symbol supply
 -- the simples being a counter.
 
-data FnCtx = FnCtx { nInst :: Int, nRef :: Int, nBlocks :: Int, blocks :: [Func.BasicBlock], _log :: [String] } deriving Show
+data FnCtx = FnCtx { nInst :: Int, nRef :: Int, nBlocks :: Int, blocks :: [Func.BasicBlock], _log :: [String], _insts :: [Inst.Inst] } deriving Show
 -- instance Monoid FnCtx where
 --   mempty = FnCtx 0 0 mempty
 --   (FnCtx is bs bbs) `mappend` (FnCtx is' bs' bbs') = FnCtx (is + is') (bs + bs') (bbs `mappend` shift is bs bbs')
@@ -65,7 +67,7 @@ getsCtx = BodyBuilderT . gets
 
 -- mapping over blocks
 runBodyBuilderT :: Monad m => Int -> BodyBuilderT m a -> m (a, [Func.BasicBlock])
-runBodyBuilderT instOffset = fmap (\(a, s) -> (a, reverseBlocks s)) . flip runStateT (FnCtx instOffset 0 0 mempty mempty) . unBodyBuilderT
+runBodyBuilderT instOffset = fmap (\(a, s) -> (a, reverseBlocks s)) . flip runStateT (FnCtx instOffset 0 0 mempty mempty mempty) . unBodyBuilderT
   where
     reverseBlocks :: FnCtx -> [Func.BasicBlock]
     reverseBlocks = map (Func.bbmap reverse) . reverse . blocks
@@ -91,11 +93,28 @@ tellLogShow = tellLog . show
 askLog :: Monad m => BodyBuilderT m String
 askLog = unlines . fmap ('\t':) . reverse <$> getsCtx _log
 
+askInsts :: Monad m => Int -> BodyBuilderT m [Func.BlockInst]
+askInsts n = do
+  bbs <- getsCtx blocks
+  if (null bbs)
+    then return []
+    else return . reverse . take n . blockInsts . head $ bbs 
+  where
+    blockInsts :: Func.BasicBlock -> [Func.BlockInst]
+    blockInsts (Func.BasicBlock is) = is
+    blockInsts (Func.NamedBlock _ is) = is
+  
 -- | Add an instruction to the current block.
 -- returns @Just ref@ if the instruction retuns
 -- a value. @Nothing@ if the instruction has no result.
 tellInst :: Monad m => Inst.Inst -> BodyBuilderT m (Maybe Val.Symbol)
 tellInst inst = do
+
+  -- [TODO], this adds extra over hread, remove it
+  --         and use the blocks directry to obtain
+  --         the instructions
+  modifyCtx (\c -> c { _insts = inst:(_insts c) })
+  
   nr <- getsCtx nRef
   case Val.Unnamed . flip Val.TRef nr <$> instTy inst of
     ref@(Just _) -> do modifyCtx (\ctx -> ctx { nInst  = 1 + nInst ctx

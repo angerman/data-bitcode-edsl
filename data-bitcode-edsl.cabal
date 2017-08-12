@@ -44,3 +44,19 @@ library
       Playground.EDSL
       Playground.Reader
   default-language: Haskell2010
+
+test-suite spec
+  main-is:           Tasty.hs
+  hs-source-dirs:    test
+  ghc-options:       -Wall -threaded
+  type:              exitcode-stdio-1.0
+  build-depends:       base
+                     , tasty
+                     , tasty-discover
+                     , tasty-hspec
+                     , process
+                     , filepath
+                     , data-bitcode
+                     , data-bitcode-llvm
+                     , data-bitcode-edsl
+  default-language:  Haskell2010

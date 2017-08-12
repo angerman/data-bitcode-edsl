@@ -71,8 +71,11 @@ float64 = float 64
 float80 = float 80
 float128 = float 128
 
-undef :: Ty.Ty -> Val.Symbol
-undef = Val.Unnamed . flip Val.Constant Val.Undef
+undef :: Ty.Ty -> Val.Value
+undef = flip Val.Constant Val.Undef
+
+undefS :: Ty.Ty -> Val.Symbol
+undefS = Val.Unnamed . undef
 
 cStrS = Val.Unnamed . cStr
 strS  = Val.Unnamed . str

@@ -11,6 +11,7 @@ import Data.BitCode.LLVM.Classes.HasType
 import Data.BitCode.LLVM.Value (Value (Function, TRef, Constant), Named(Unnamed), Symbol, symbolValue)
 import Data.BitCode.LLVM.Types (BasicBlockId)
 import Data.BitCode.LLVM.Type  (Ty)
+import Data.BitCode.LLVM.Function (BlockInst)
 import Data.BitCode.LLVM.Util  hiding (lift)
 import Data.BitCode.LLVM.Instruction (TailCallKind)
 import Data.BitCode.LLVM.CallingConv (CallingConv)
@@ -38,6 +39,7 @@ import Control.Monad ((<=<), (>=>))
 import Data.Functor.Identity (Identity)
 
 import GHC.Stack
+import Data.Word (Word64)
 
 type Error = String
 type Inst = Either Error Inst.Inst
@@ -51,7 +53,8 @@ exceptT res = case res of
   r@(Right{}) -> ExceptT (pure r)
   (Left errMsg) -> do
     log <- lift askLog
-    ExceptT (pure . Left $ unlines ["LOG", log, "ERROR", errMsg])
+    insts <- unlines . fmap (('\t':) . show . pretty) <$> lift (askInsts 20)
+    ExceptT (pure . Left $ unlines ["LOG", log, "Last 20 instructions", insts, "ERROR", errMsg])
 
 sthrowE :: (Monad m, Show a) => a -> ExceptT Error m b
 sthrowE = throwE . show
@@ -82,8 +85,8 @@ switchI :: HasCallStack => Symbol -> BasicBlockId -> [(Symbol, BasicBlockId)] ->
 switchI c def cases = pure $ Inst.Switch c def cases
 gepI :: HasCallStack => Symbol -> [Symbol] -> Inst
 gepI s = pure . Inst.Gep (ty s) True s
-extractValueI :: HasCallStack => Symbol -> [Symbol] -> Inst
-extractValueI s = pure . Inst.ExtractValue (ty s) s
+extractValueI :: HasCallStack => Symbol -> [Word64] -> Inst
+extractValueI s = pure . Inst.ExtractValue s
 
 -- ** Cast
 -- TODO: support FCMP as well.
@@ -244,14 +247,14 @@ call' tck cc f args
   | (TRef{})     <- symbolValue f = lift . tellInst =<< exceptT (callI tck cc (ty f) f args)
   | otherwise                     = sthrowE $ text "Cannot call: " <+> pretty f
 
-call :: Monad m => CallingConv -> Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
+call :: (HasCallStack, Monad m) => CallingConv -> Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
 call cc f args = call' Inst.None cc f args
-tailcall :: Monad m => CallingConv -> Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
+tailcall :: (HasCallStack, Monad m) => CallingConv -> Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
 tailcall cc f args = call' Inst.Tail cc f args
 
-ccall :: Monad m => Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
+ccall :: (HasCallStack, Monad m) => Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
 ccall f args = call' Inst.None CConv.C f args
-ghccall :: Monad m => Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
+ghccall :: (HasCallStack, Monad m) => Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
 ghccall f args = call' Inst.None CConv.GHC f args
 
 tailccall :: Monad m => Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
@@ -267,12 +270,13 @@ retVoid = exceptT retVoidI >>= lift . tellInst >> pure ()
 ubr :: Monad m => BasicBlockId -> EdslT m (Maybe Symbol)
 ubr = lift . tellInst <=< exceptT . ubrI
 br :: Monad m => Symbol -> BasicBlockId -> BasicBlockId -> EdslT m (Maybe Symbol)
-br cond l r = lift . tellInst =<< exceptT (brI cond l r)
+br cond l r | ty cond == i1 = lift . tellInst =<< exceptT (brI cond l r)
+            | otherwise     = sthrowE $ text "Cannot branch with " <+> pretty cond <+> text " condition. Must be i1"
 switch :: Monad m => Symbol -> BasicBlockId -> [(Symbol, BasicBlockId)] -> EdslT m (Maybe Symbol)
 switch cond def cases = lift . tellInst =<< exceptT (switchI cond def cases)
 gep :: Monad m => Symbol -> [Symbol] -> EdslT m Symbol
 gep s = tellInst'' . gepI s
-extractValue :: (HasCallStack, Monad m) => Symbol -> [Symbol] -> EdslT m Symbol
+extractValue :: (HasCallStack, Monad m) => Symbol -> [Word64] -> EdslT m Symbol
 extractValue s = tellInst'' . extractValueI s
 
 -- ** Cast
