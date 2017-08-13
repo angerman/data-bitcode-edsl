@@ -7,7 +7,7 @@ module EDSL
   ( module EDSL.Types
   , module EDSL.Values
   , module EDSL.Instructions
-  , global, extGlobal, privateGlobal, internalGlobal
+  , global, extGlobal
   , ghcfun, fun
   , block, block', block''
   , def, defT, def_
