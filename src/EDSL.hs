@@ -7,7 +7,7 @@ module EDSL
   ( module EDSL.Types
   , module EDSL.Values
   , module EDSL.Instructions
-  , global, extGlobal
+  , global, extGlobal, privateGlobal, internalGlobal
   , ghcfun, fun
   , block, block', block''
   , def, defT, def_
@@ -65,38 +65,50 @@ import Control.Monad.Trans.Except (ExceptT(..), runExceptT, throwE)
 
 import Data.Binary (encodeFile)
 
+import GHC.Stack (HasCallStack)
+
 -- | create a typed label to be resolved later.
-label :: String -> Ty.Ty -> Val.Symbol
+label :: HasCallStack => String -> Ty.Ty -> Val.Symbol
 label name = Val.Named name . Val.Label
 
 -- | create a global constant
-global :: String -> Val.Value -> Val.Symbol
-global name val = Val.Named name $ defGlobal {Val.gPointerType = ptr (ty val), Val.gInit = Just (Val.Unnamed val) }
+global :: HasCallStack => String -> Val.Value -> Val.Symbol
+global name val = Val.Named name $ defGlobal { Val.gPointerType = ptr (ty val)
+                                             , Val.gInit = Just (Val.Unnamed val) }
+
+privateGlobal :: HasCallStack => String -> Val.Value -> Val.Symbol
+privateGlobal name val = Val.Named name $ defGlobal  { Val.gPointerType = ptr (ty val)
+                                                     , Val.gInit = Just (Val.Unnamed val)
+                                                     , Val.gLinkage = Linkage.Private }
+internalGlobal :: HasCallStack => String -> Val.Value -> Val.Symbol
+internalGlobal name val = Val.Named name $ defGlobal { Val.gPointerType = ptr (ty val)
+                                                     , Val.gInit = Just (Val.Unnamed val)
+                                                     , Val.gLinkage = Linkage.Internal}
 
 -- | create an external global constant
-extGlobal :: String -> Ty.Ty -> Val.Symbol
+extGlobal :: HasCallStack => String -> Ty.Ty -> Val.Symbol
 extGlobal name ty = Val.Named name $ defGlobal { Val.gPointerType = ptr ty }
 
-fun :: String -> Ty.Ty -> Val.Symbol
+fun :: HasCallStack => String -> Ty.Ty -> Val.Symbol
 fun name sig = Val.Named name $ defFunction { Val.fType = ptr sig, Val.fIsProto = True }
 
-ghcfun :: String -> Ty.Ty -> Val.Symbol
+ghcfun :: HasCallStack => String -> Ty.Ty -> Val.Symbol
 ghcfun name sig = Val.Named name $ defFunction { Val.fType = ptr sig, Val.fIsProto = False, Val.fCallingConv = CallingConv.GHC }
 
 -- | BasicBlocks
-block'' :: Monad m => l -> EdslT m a -> EdslT m ((l, BasicBlockId), a)
+block'' :: (HasCallStack, Monad m) => l -> EdslT m a -> EdslT m ((l, BasicBlockId), a)
 block'' name instructions = do
   bbRef <- lift tellNewBlock
   ((name, bbRef),) <$> instructions
 
-block' :: Monad m => l -> EdslT m a -> EdslT m (l, BasicBlockId)
+block' :: (HasCallStack, Monad m) => l -> EdslT m a -> EdslT m (l, BasicBlockId)
 block' name instructions = fst <$> block'' name instructions
 
-block :: Monad m => l -> EdslT m a -> EdslT m BasicBlockId
+block :: (HasCallStack, Monad m) => l -> EdslT m a -> EdslT m BasicBlockId
 block l = fmap snd . block' l
 
 -- | Function definition
-defT :: Monad m
+defT :: (HasCallStack, Monad m)
      => String                             -- ^ The name of the function
      -> Ty.Ty                              -- ^ The function signature ([x] --> y)
      -> ([Val.Symbol] -> EdslT m a)        -- ^ The body generator (symbols are references to the functions arguments)
@@ -108,15 +120,15 @@ defT name sig body = ExceptT $ runBodyBuilderT' 0 $ runExceptT (body args)
         runBodyBuilderT' :: (Monad m, Functor f) => Int -> BodyBuilderT m (f a) -> m (f Func.Function)
         runBodyBuilderT' i = fmap (\(a, s) -> fmap (const (mkFunc s)) a) . runBodyBuilderT i
 
-def :: String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Either Error Func.Function
+def :: HasCallStack => String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Either Error Func.Function
 def name sig = runIdentity . runExceptT .  defT name sig
 
-def_ :: String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Func.Function
+def_ :: HasCallStack => String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Func.Function
 def_ name sig body = case def name sig body of
   Left e -> error e
   Right f -> f
 
-ghcdefT :: Monad m
+ghcdefT :: (HasCallStack, Monad m)
         => String
         -> Ty.Ty
         -> ([Val.Symbol] -> EdslT m a)
@@ -128,19 +140,19 @@ ghcdefT name sig body = ExceptT $ runBodyBuilderT' 0 $ runExceptT (body args)
         runBodyBuilderT' :: (Monad m, Functor f) => Int -> BodyBuilderT m (f a) -> m (f Func.Function)
         runBodyBuilderT' i = fmap (\(a, s) -> fmap (const (mkFunc s)) a) . runBodyBuilderT i
 
-ghcdef :: String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Either Error Func.Function
+ghcdef :: HasCallStack => String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Either Error Func.Function
 ghcdef name sig = runIdentity . runExceptT . ghcdefT name sig
 
 -- | Prefix Data
-withPrefixData :: Val.Symbol -> Func.Function -> Func.Function
+withPrefixData :: HasCallStack => Val.Symbol -> Func.Function -> Func.Function
 withPrefixData dat f = f { Func.dSig = sig' }
   where sig = Func.dSig f
         sig' = (\x -> x { Val.fPrefixData = pure dat }) <$> sig
 
 -- | Module
-mod :: String -> [Func.Function] -> Module
+mod :: HasCallStack => String -> [Func.Function] -> Module
 mod name = mod' name []
-mod' :: String -> [Val.Symbol] -> [Func.Function] -> Module
+mod' :: HasCallStack => String -> [Val.Symbol] -> [Func.Function] -> Module
 mod' name modGlobals fns = Module
   { mVersion    = 1
   , mTriple     = Nothing
@@ -235,15 +247,15 @@ mod' name modGlobals fns = Module
 
 --------------------------------------------------------------------------------
 -- I/O
-writeModule :: FilePath -> Module -> IO ()
+writeModule :: HasCallStack => FilePath -> Module -> IO ()
 writeModule f = writeFile f . withHeader True . emitTopLevel . map denormalize . toBitCode . (Just (Ident "Data.BitCode.LLVM" Current),)
 
-dumpModuleBitcodeAST :: FilePath -> Module -> IO ()
+dumpModuleBitcodeAST :: HasCallStack => FilePath -> Module -> IO ()
 dumpModuleBitcodeAST f = encodeFile f . map denormalize . toBitCode . (Just (Ident "Data.BitCode.LLVM" Current),)
 
 --------------------------------------------------------------------------------
 -- Predicates
-isFunction, isGlobal, isFnConstant, isLabel :: Val.Symbol -> Bool
+isFunction, isGlobal, isFnConstant, isLabel :: HasCallStack => Val.Symbol -> Bool
 isFunction x
   | (Val.Function{}) <- Val.symbolValue x = True
   | otherwise                             = False
@@ -276,7 +288,7 @@ isLabel x
 -- Label replacement for symbols.
 type LabelMap = [(Val.Symbol, Val.Symbol)]
 
-replaceLabel :: LabelMap -> Val.Symbol -> Val.Symbol
+replaceLabel :: HasCallStack => LabelMap -> Val.Symbol -> Val.Symbol
 replaceLabel m l@(Val.Named _ (Val.Label _)) = case lookup l m of
   Nothing -> error $ "FATAL: Label " ++ show (pretty l) ++ " not in labelMap!"
   Just s  | (ty l) == (ty s) -> s
@@ -287,7 +299,7 @@ replaceLabel m l@(Val.Named _ (Val.Label _)) = case lookup l m of
           | otherwise -> traceShow ("!! WARN: Ignoring type missmatch " ++ show (pretty s) ++ " to " ++ show (pretty (ty l))) $ s
 
 -- Label replacement for instructions.
-replaceLabel' :: LabelMap -> Val.Symbol -> Val.Symbol
+replaceLabel' :: HasCallStack => LabelMap -> Val.Symbol -> Val.Symbol
  -- turn functions into labels to be replaced by their right value.
 replaceLabel' m l@(Val.Named _ (Val.Label _)) = case lookup l m of
   Nothing -> error $ "FATAL: Label " ++ show (pretty l) ++ " not in labelMap!"
@@ -298,16 +310,16 @@ replaceLabel' m l@(Val.Named _ (Val.Label _)) = case lookup l m of
          | otherwise -> traceShow ("!! WARN: Ignoring type missmatch " ++ show (pretty s) ++ " to " ++ show (pretty (ty l))) $ s
 
 -- * Symbols
-replaceLabels :: LabelMap -> Val.Symbol -> Val.Symbol
+replaceLabels :: HasCallStack => LabelMap -> Val.Symbol -> Val.Symbol
 replaceLabels m s | isLabel s = replaceLabel m s
                   | otherwise = fmap (replaceLabelsV m) s
 
-replaceLabels' :: LabelMap -> Val.Symbol -> Val.Symbol
+replaceLabels' :: HasCallStack => LabelMap -> Val.Symbol -> Val.Symbol
 replaceLabels' m s | isLabel s = replaceLabel' m s
                    | otherwise = fmap (replaceLabelsV' m) s
 
 -- * Values
-replaceLabelsV :: LabelMap -> Val.Value -> Val.Value
+replaceLabelsV :: HasCallStack => LabelMap -> Val.Value -> Val.Value
 replaceLabelsV m = \case
   g@(Val.Global{..}) -> g { Val.gInit = replaceLabels m <$> gInit }
   f@(Val.Function{..}) -> f { Val.fPrologueData = replaceLabels m <$> fPrologueData
@@ -317,7 +329,7 @@ replaceLabelsV m = \case
   c@(Val.Constant{..}) -> c { Val.cConst = replaceLabelsC m cConst }
   x -> x
 
-replaceLabelsV' :: LabelMap -> Val.Value -> Val.Value
+replaceLabelsV' :: HasCallStack => LabelMap -> Val.Value -> Val.Value
 replaceLabelsV' m = \case
   g@(Val.Global{..}) -> g { Val.gInit = replaceLabels m <$> gInit }
   f@(Val.Function{..}) -> f { Val.fPrologueData = replaceLabels m <$> fPrologueData
@@ -328,7 +340,7 @@ replaceLabelsV' m = \case
   x -> x
 
 -- * Constants
-replaceLabelsC :: LabelMap -> Val.Const -> Val.Const
+replaceLabelsC :: HasCallStack => LabelMap -> Val.Const -> Val.Const
 replaceLabelsC m = \case
   (Val.Array ss) -> Val.Array (map (replaceLabels m) ss)
   (Val.Vector ss) -> Val.Vector (map (replaceLabels m) ss)
@@ -340,7 +352,7 @@ replaceLabelsC m = \case
   x -> x
 
 -- * Instructions
-replaceLabelI :: LabelMap -> Val.Symbol -> Val.Symbol
+replaceLabelI :: HasCallStack => LabelMap -> Val.Symbol -> Val.Symbol
 -- turn functions into labels to be replaced by their right value.
 replaceLabelI m l@(Val.Named _ (Val.Label _)) = case lookup l m of
   Nothing -> error $ "FATAL: Label " ++ show (pretty l) ++ " not in labelMap!"
@@ -349,7 +361,7 @@ replaceLabelI m l@(Val.Named _ (Val.Label _)) = case lookup l m of
 replaceLabelI _ x = x
 
 -- * Update Instructions, and replace labels with their values.
-updateInst :: (Val.Symbol -> Val.Symbol) -> LabelMap -> Inst.Inst -> Inst.Inst
+updateInst :: HasCallStack => (Val.Symbol -> Val.Symbol) -> LabelMap -> Inst.Inst -> Inst.Inst
 updateInst fixFunction m = \case
   i@(Inst.Call {..})         ->  i { Inst.cSym  = fixFunction (replaceLabels m cSym)
                                    , Inst.cArgs = map (replaceLabels m) cArgs
