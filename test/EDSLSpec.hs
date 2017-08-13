@@ -138,3 +138,20 @@ spec_edsl = do
       decompile bcfile `shouldReturn` (bcfile -<.> "dis")
       compile bcfile `shouldReturn` (bcfile -<.> "exe")
       run (bcfile -<.> "exe") [] `shouldReturn` (0, "", "")
+
+    it "should be able to GEP into a string" $ do
+      let bcfile = "test/gep_str.bc"
+          testModule :: Module
+          testModule = mod "undef"
+            [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+                block "entry" $ do
+                  strPtr  <- gep (global "foo" (cStr "hello world\n")) [int32 0, int32 6]
+                  ccall (fun "printf" (vararg $ [i8ptr] --> i32)) [strPtr]
+                  ret $ int32 0
+                pure ()
+            ]
+      writeModule bcfile testModule
+      decompile bcfile `shouldReturn` (bcfile -<.> "dis")
+      compile bcfile `shouldReturn` (bcfile -<.> "exe")
+      run (bcfile -<.> "exe") [] `shouldReturn` (0, "world\n", "")
+     
