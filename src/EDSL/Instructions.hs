@@ -156,6 +156,9 @@ cmpXchgI ptr cmp val ord scope failOrd | lower (ty ptr) == ty cmp && ty cmp == t
                                                                                          $+$ text "CMP: " <+> pretty cmp
                                                                                          $+$ text "VAL: " <+> pretty val)
 
+fenceI :: HasCallStack => AtomicOrdering -> AtomicSynchScope -> Inst
+fenceI ord = pure . Inst.Fence ord
+
 mkAtomicRMWOp :: HasCallStack => RMWOperations -> Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> Inst
 mkAtomicRMWOp op lhs rhs ord scope | lower (ty lhs) == ty rhs = pure $ Inst.AtomicRMW lhs rhs op ord scope
                                    | otherwise = serror $ text "*** Type Error:" <+> (text ("AtomicRMW (" ++ show op ++ "), types do not agree")
@@ -336,6 +339,9 @@ atomicStore s t o ss = exceptT (atomicStoreI s t o ss) >>= lift . tellInst >> pu
 
 cmpXchg :: Monad m => Symbol -> Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> AtomicOrdering -> EdslT m Symbol
 cmpXchg ptr cmp val ord scope failOrd = tellInst'' $ cmpXchgI ptr cmp val ord scope failOrd
+
+fence :: Monad m => AtomicOrdering -> AtomicSynchScope -> EdslT m ()
+fence ord scope = exceptT (fenceI ord scope) >>= lift . tellInst >> pure ()
 
 atomicXchg, atomicAdd, atomicSub, atomicNand, atomicOr, atomicXor, atomicMax, atomicMin, atomicUmax, atomicUmin :: Monad m => Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> EdslT m Symbol
 atomicXchg lhs rhs ord scope = tellInst'' $ atomicXchgI lhs rhs ord scope
