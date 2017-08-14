@@ -24,3 +24,5 @@ data/
 GNUmakefile
 ghc.mk
 .ghc.environment.*
+test/*.dis
+test/*.exe
