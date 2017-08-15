@@ -9,6 +9,7 @@ import Prelude hiding (mod)
 import EDSL
 
 import Data.BitCode.LLVM (Module)
+import Data.BitCode.LLVM.Classes.HasType (ty)
 
 import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(ExitSuccess))
@@ -154,4 +155,51 @@ spec_edsl = do
       decompile bcfile `shouldReturn` (bcfile -<.> "dis")
       compile bcfile `shouldReturn` (bcfile -<.> "exe")
       run (bcfile -<.> "exe") [] `shouldReturn` (0, "world\n", "")
-     
+
+    it "should be able to store the arguments" $ do
+      let bcfile = "test/store_args.bc"
+          testModule :: Module
+          testModule = mod "undef"
+            [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+                block "entry" $ do
+                  argcSlot <- alloca i32 (int32 1) -- space for 1 i32
+                  store argcSlot argc
+            
+                  argvSlot <- alloca (ptr i8ptr) (int32 1)
+                  store argvSlot argv
+            
+                  ret $ int32 0
+                pure ()
+            ]
+      writeModule bcfile testModule
+      decompile bcfile `shouldReturn` (bcfile -<.> "dis")
+      compile bcfile `shouldReturn` (bcfile -<.> "exe")
+      run (bcfile -<.> "exe") [] `shouldReturn` (0, "", "")
+
+    it "should be able to carry prefix data" $ do
+      let bcfile = "test/prefix_data.bc"
+          testModule :: Module
+          testModule = mod "undef"
+            [ withPrefixData prefix $ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+                block "entry" $ do
+                  -- we will obtain the argc and argv slot to populate the local instruction and
+                  -- refernece count here
+                  argcSlot <- alloca i32 (int32 1) -- space for 1 i32
+                  store argcSlot argc
+            
+                  argvSlot <- alloca (ptr i8ptr) (int32 1)
+                  store argvSlot argv
+
+                  -- obtain a function pointer to @main
+                  fp <- bitcast (ptr (ty prefix)) (fun "main" ([i32, ptr i8ptr] --> i32))
+                  -- get the pointer to the prefix data and load it.
+                  v <- gep fp [int32 (-1), int32 1] >>= load
+                  ret v
+                pure ()
+            ]
+            where prefix = struct [(int32 1), (int32 10), (int32 11)]
+      writeModule bcfile testModule
+      decompile bcfile `shouldReturn` (bcfile -<.> "dis")
+      compile bcfile `shouldReturn` (bcfile -<.> "exe")
+      run (bcfile -<.> "exe") [] `shouldReturn` (10, "", "")       
+            

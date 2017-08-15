@@ -51,7 +51,7 @@ defSymbol = undefined
 -- Globals (globals, functions, aliases)
 defGlobal, defFunction, defAlias :: Val.Value
 defGlobal   = Val.Global void True 0 Nothing defLinkage 0 0 defVisibility defTLM False False defStorageClass 0
-defFunction = Val.Function void defCC True defLinkage 0 0 0 defVisibility 0 False Nothing defStorageClass 0 Nothing 0
+defFunction = Val.Function void defCC defLinkage 0 0 0 defVisibility 0 False defStorageClass 0 0 (Val.FE True Nothing Nothing)
 defAlias    = Val.Alias void 0 defSymbol defLinkage defVisibility defTLM False defStorageClass
 
 -- * Constant Values

@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# OPTIONS_GHC -fprof-auto #-} 
 {-# LANGUAGE TupleSections     #-}
 {-# LANGUAGE LambdaCase        #-}
 
@@ -89,11 +90,19 @@ internalGlobal name val = Val.Named name $ defGlobal { Val.gPointerType = ptr (t
 extGlobal :: HasCallStack => String -> Ty.Ty -> Val.Symbol
 extGlobal name ty = Val.Named name $ defGlobal { Val.gPointerType = ptr ty }
 
+-- | Mark a function as a declaration (Prototype)
+mkDecl :: Val.Value -> Val.Value
+mkDecl f@(Val.Function{..}) = f { Val.fExtra = fExtra { Val.feProto = True } }
+
+-- | Mark a function as a definition (non Prototype)
+mkDef :: Val.Value -> Val.Value
+mkDef f@(Val.Function{..}) = f { Val.fExtra = fExtra { Val.feProto = False } }
+
 fun :: HasCallStack => String -> Ty.Ty -> Val.Symbol
-fun name sig = Val.Named name $ defFunction { Val.fType = ptr sig, Val.fIsProto = True }
+fun name sig = Val.Named name $ mkDecl $ defFunction { Val.fType = ptr sig }
 
 ghcfun :: HasCallStack => String -> Ty.Ty -> Val.Symbol
-ghcfun name sig = Val.Named name $ defFunction { Val.fType = ptr sig, Val.fIsProto = False, Val.fCallingConv = CallingConv.GHC }
+ghcfun name sig = Val.Named name $ mkDef $ defFunction { Val.fType = ptr sig, Val.fCallingConv = CallingConv.GHC }
 
 -- | BasicBlocks
 block'' :: (HasCallStack, Monad m) => l -> EdslT m a -> EdslT m ((l, BasicBlockId), a)
@@ -116,7 +125,7 @@ defT :: (HasCallStack, Monad m)
 defT name sig body = ExceptT $ runBodyBuilderT' 0 $ runExceptT (body args)
   where args = map Val.Unnamed $ zipWith Val.Arg (Ty.teParamTy sig) [0..]
         mkFunc :: [Func.BasicBlock] -> Func.Function
-        mkFunc = Func.Function (Val.Named name $ defFunction { Val.fType = ptr sig, Val.fIsProto = False}) []
+        mkFunc = Func.Function (Val.Named name $ mkDef $ defFunction { Val.fType = ptr sig }) []
         runBodyBuilderT' :: (Monad m, Functor f) => Int -> BodyBuilderT m (f a) -> m (f Func.Function)
         runBodyBuilderT' i = fmap (\(a, s) -> fmap (const (mkFunc s)) a) . runBodyBuilderT i
 
@@ -136,7 +145,7 @@ ghcdefT :: (HasCallStack, Monad m)
 ghcdefT name sig body = ExceptT $ runBodyBuilderT' 0 $ runExceptT (body args)
   where args = map Val.Unnamed $ zipWith Val.Arg (Ty.teParamTy sig) [0..]
         mkFunc :: [Func.BasicBlock] -> Func.Function
-        mkFunc = Func.Function (Val.Named name $ defFunction { Val.fType = ptr sig, Val.fIsProto = False, Val.fCallingConv = CallingConv.GHC }) []
+        mkFunc = Func.Function (Val.Named name $ mkDef $ defFunction { Val.fType = ptr sig, Val.fCallingConv = CallingConv.GHC }) []
         runBodyBuilderT' :: (Monad m, Functor f) => Int -> BodyBuilderT m (f a) -> m (f Func.Function)
         runBodyBuilderT' i = fmap (\(a, s) -> fmap (const (mkFunc s)) a) . runBodyBuilderT i
 
@@ -147,7 +156,7 @@ ghcdef name sig = runIdentity . runExceptT . ghcdefT name sig
 withPrefixData :: HasCallStack => Val.Symbol -> Func.Function -> Func.Function
 withPrefixData dat f = f { Func.dSig = sig' }
   where sig = Func.dSig f
-        sig' = (\x -> x { Val.fPrefixData = pure dat }) <$> sig
+        sig' = (\x -> x { Val.fExtra = (Val.fExtra x) { Val.fePrefixData = pure dat }}) <$> sig
 
 -- | Module
 mod :: HasCallStack => String -> [Func.Function] -> Module
@@ -159,7 +168,7 @@ mod' name modGlobals fns = Module
   , mDatalayout = Nothing
   , mValues = globalValues'
   -- TODO: This is looks aweful. However we ended up with non prototype fn's here. :(
-  , mDecls = map (fmap (\f -> f { Val.fIsProto = True })) refFns'
+  , mDecls = map (fmap mkDecl) refFns'
   , mFns = map updateFunction fns
   }
   where globals = modGlobals ++ filter isGlobal (fsymbols [] fns)
@@ -237,8 +246,11 @@ mod' name modGlobals fns = Module
         updateFunction f = f { -- replace lables in the function signature.
                                Func.dSig   = replaceLabels labelMap' (Func.dSig f)
                                -- build the constants list.
-                             , Func.dConst = sort $ filter isFnConstant $ filter (\x -> not (x `elem` allValues)) (fsymbols allValues body)
-                               -- set the fixed body.
+                             , Func.dConst =   sort
+                                             . filter (\x -> not (x `elem` allValues))
+                                             . filter isFnConstant
+                                             $ fsymbols allValues body
+                               -- set the updated (with fixed lables) body.
                              , Func.dBody  = body
                              }
           where
@@ -322,8 +334,9 @@ replaceLabels' m s | isLabel s = replaceLabel' m s
 replaceLabelsV :: HasCallStack => LabelMap -> Val.Value -> Val.Value
 replaceLabelsV m = \case
   g@(Val.Global{..}) -> g { Val.gInit = replaceLabels m <$> gInit }
-  f@(Val.Function{..}) -> f { Val.fPrologueData = replaceLabels m <$> fPrologueData
-                            , Val.fPrefixData   = replaceLabels m <$> fPrefixData
+  f@(Val.Function{..}) -> f { Val.fExtra = (Val.fExtra f) { Val.fePrologueData = replaceLabels m <$> Val.fePrologueData fExtra
+                                                          , Val.fePrefixData   = replaceLabels m <$> Val.fePrefixData fExtra
+                                                          }
                             }
   a@(Val.Alias{..}) -> a { Val.aVal = replaceLabels m aVal }
   c@(Val.Constant{..}) -> c { Val.cConst = replaceLabelsC m cConst }
@@ -332,8 +345,9 @@ replaceLabelsV m = \case
 replaceLabelsV' :: HasCallStack => LabelMap -> Val.Value -> Val.Value
 replaceLabelsV' m = \case
   g@(Val.Global{..}) -> g { Val.gInit = replaceLabels m <$> gInit }
-  f@(Val.Function{..}) -> f { Val.fPrologueData = replaceLabels m <$> fPrologueData
-                            , Val.fPrefixData   = replaceLabels m <$> fPrefixData
+  f@(Val.Function{..}) -> f { Val.fExtra = (Val.fExtra f) { Val.fePrologueData = replaceLabels m <$> Val.fePrologueData fExtra
+                                                          , Val.fePrefixData   = replaceLabels m <$> Val.fePrefixData fExtra
+                                                          }
                             }
   a@(Val.Alias{..}) -> a { Val.aVal = replaceLabels m aVal }
   c@(Val.Constant{..}) -> c { Val.cConst = replaceLabelsC m cConst }
