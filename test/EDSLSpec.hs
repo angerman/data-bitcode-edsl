@@ -63,12 +63,13 @@ spec_edsl = do
           testModule = mod "branch"
             [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
-                  cond <- argc `iugt` int32 1
+                  c1 <- int32 1
+                  cond <- argc `iugt` c1
                   br cond one two
                 one <- block "one" $ do
-                  ret $ int32 0
+                  ret =<< int32 0
                 two <- block "two" $ do
-                  ret $ int32 1
+                  ret =<< int32 1
                 pure ()
             ]
       writeModule bcfile testModule
@@ -86,17 +87,20 @@ spec_edsl = do
           testModule = mod "switch"
             [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
-                  switch argc fallback [(int32 1, one)
-                                       ,(int32 2, two)
-                                       ,(int32 3, three)]
+                  c1 <- int32 1
+                  c2 <- int32 2
+                  c3 <- int32 3
+                  switch argc fallback [(c1, one)
+                                       ,(c2, two)
+                                       ,(c3, three)]
                 fallback <- block "default" $ do
-                  ret $ int32 (-1)
+                  ret =<< int32 (-1)
                 one <- block "one" $ do
-                  ret $ int32 1
+                  ret =<< int32 1
                 two <- block "two" $ do
-                  ret $ int32 2
+                  ret =<< int32 2
                 three <- block "three" $ do
-                  ret $ int32 3
+                  ret =<< int32 3
                 pure ()
             ]
       writeModule bcfile testModule
@@ -113,9 +117,10 @@ spec_edsl = do
           testModule = mod "branch"
             [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
-                  slots <- alloca i8 (int8 16)
-                  ccall (fun "llvm.memset.p0i8.i32" ([i8ptr, i8, i32, i32, i1] --> void)) [ slots, int8 0, int32 16, int32 4, int 1 0]
-                  ret $ int32 0
+                  slots <- alloca i8 =<< int8 16
+                  memset <- fun "llvm.memset.p0i8.i32" ([i8ptr, i8, i32, i32, i1] --> void) 
+                  ccall memset =<< (slots:) <$> sequence [ int8 0, int32 16, int32 4, int 1 0]
+                  ret =<< int32 0
                 pure ()
             ]
       writeModule bcfile testModule
@@ -129,10 +134,12 @@ spec_edsl = do
           testModule = mod "undef"
             [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
-                  let mem = undef (arr 10 i8)
-                  ptr <- gep (global "mem" mem) [int32 0, int32 0]
-                  ccall (fun "llvm.memset.p0i8.i32" ([i8ptr, i8, i32, i32, i1] --> void)) [ ptr, int8 0, int32 10, int32 4, int 1 0 ]
-                  ret $ int32 0
+                  mem <- undef (arr 10 i8)
+                  memG <- global "mem" mem 
+                  ptr <- gep memG =<< sequence [int32 0, int32 0]
+                  memset <- fun "llvm.memset.p0i8.i32" ([i8ptr, i8, i32, i32, i1] --> void) 
+                  ccall memset =<< (ptr:) <$> sequence [ int8 0, int32 10, int32 4, int 1 0 ]
+                  ret =<< int32 0
                 pure ()
             ]
       writeModule bcfile testModule
@@ -146,9 +153,11 @@ spec_edsl = do
           testModule = mod "undef"
             [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
-                  strPtr  <- gep (global "foo" (cStr "hello world\n")) [int32 0, int32 6]
-                  ccall (fun "printf" (vararg $ [i8ptr] --> i32)) [strPtr]
-                  ret $ int32 0
+                  foo <- global "foo" =<< cStr "hello world\n" 
+                  strPtr  <- gep foo =<< sequence [int32 0, int32 6]
+                  printf <- fun "printf" (vararg $ [i8ptr] --> i32)
+                  ccall printf [strPtr]
+                  ret =<< int32 0
                 pure ()
             ]
       writeModule bcfile testModule
@@ -162,13 +171,13 @@ spec_edsl = do
           testModule = mod "undef"
             [ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
-                  argcSlot <- alloca i32 (int32 1) -- space for 1 i32
+                  argcSlot <- alloca i32 =<< int32 1 -- space for 1 i32
                   store argcSlot argc
             
-                  argvSlot <- alloca (ptr i8ptr) (int32 1)
+                  argvSlot <- alloca (ptr i8ptr) =<< int32 1
                   store argvSlot argv
             
-                  ret $ int32 0
+                  ret =<< int32 0
                 pure ()
             ]
       writeModule bcfile testModule
@@ -180,24 +189,25 @@ spec_edsl = do
       let bcfile = "test/prefix_data.bc"
           testModule :: Module
           testModule = mod "undef"
-            [ withPrefixData prefix $ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+            [ withPrefixDataM_ prefix $ def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
                   -- we will obtain the argc and argv slot to populate the local instruction and
                   -- refernece count here
-                  argcSlot <- alloca i32 (int32 1) -- space for 1 i32
+                  argcSlot <- alloca i32 =<< int32 1 -- space for 1 i32
                   store argcSlot argc
             
-                  argvSlot <- alloca (ptr i8ptr) (int32 1)
+                  argvSlot <- alloca (ptr i8ptr) =<< int32 1
                   store argvSlot argv
 
                   -- obtain a function pointer to @main
-                  fp <- bitcast (ptr (ty prefix)) (fun "main" ([i32, ptr i8ptr] --> i32))
+                  prefixTy <- ty <$> prefix
+                  fp <- bitcast (ptr prefixTy) =<< fun "main" ([i32, ptr i8ptr] --> i32)
                   -- get the pointer to the prefix data and load it.
-                  v <- gep fp [int32 (-1), int32 1] >>= load
+                  v <- load =<< gep fp =<< sequence [int32 (-1), int32 1 ]
                   ret v
                 pure ()
             ]
-            where prefix = struct [(int32 1), (int32 10), (int32 11)]
+            where prefix = struct <$> sequence [(int32 1), (int32 10), (int32 11)]
       writeModule bcfile testModule
       decompile bcfile `shouldReturn` (bcfile -<.> "dis")
       compile bcfile `shouldReturn` (bcfile -<.> "exe")

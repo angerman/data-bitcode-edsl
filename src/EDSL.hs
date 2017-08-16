@@ -8,8 +8,7 @@ module EDSL
   ( module EDSL.Types
   , module EDSL.Values
   , module EDSL.Instructions
-  , global, extGlobal
-  , ghcfun, fun
+  , Result(..)
   , block, block', block''
   , def, defT, def_
   , ghcdef, ghcdefT
@@ -17,7 +16,8 @@ module EDSL
   , writeModule
   , dumpModuleBitcodeAST
   , withPrefixData
-  , label
+  , withPrefixDataM
+  , withPrefixDataM_
   )
 where
 
@@ -68,41 +68,26 @@ import Data.Binary (encodeFile)
 
 import GHC.Stack (HasCallStack)
 
--- | create a typed label to be resolved later.
-label :: HasCallStack => String -> Ty.Ty -> Val.Symbol
-label name = Val.Named name . Val.Label
+data Result
+  = FunctionResult
+  { _f :: Func.Function
+  , _fglobals :: [Val.Symbol]
+  , _fconsts :: [Val.Symbol]
+  , _flabels :: [Val.Symbol]
+  }
+  | DataResult
+  { _d :: Val.Symbol
+  , _dglobals :: [Val.Symbol]
+  , _dconsts :: [Val.Symbol]
+  , _dlabels :: [Val.Symbol]
+  }
+  deriving (Show)
 
--- | create a global constant
-global :: HasCallStack => String -> Val.Value -> Val.Symbol
-global name val = Val.Named name $ defGlobal { Val.gPointerType = ptr (ty val)
-                                             , Val.gInit = Just (Val.Unnamed val) }
-
-privateGlobal :: HasCallStack => String -> Val.Value -> Val.Symbol
-privateGlobal name val = Val.Named name $ defGlobal  { Val.gPointerType = ptr (ty val)
-                                                     , Val.gInit = Just (Val.Unnamed val)
-                                                     , Val.gLinkage = Linkage.Private }
-internalGlobal :: HasCallStack => String -> Val.Value -> Val.Symbol
-internalGlobal name val = Val.Named name $ defGlobal { Val.gPointerType = ptr (ty val)
-                                                     , Val.gInit = Just (Val.Unnamed val)
-                                                     , Val.gLinkage = Linkage.Internal}
-
--- | create an external global constant
-extGlobal :: HasCallStack => String -> Ty.Ty -> Val.Symbol
-extGlobal name ty = Val.Named name $ defGlobal { Val.gPointerType = ptr ty }
-
--- | Mark a function as a declaration (Prototype)
-mkDecl :: Val.Value -> Val.Value
-mkDecl f@(Val.Function{..}) = f { Val.fExtra = fExtra { Val.feProto = True } }
-
--- | Mark a function as a definition (non Prototype)
-mkDef :: Val.Value -> Val.Value
-mkDef f@(Val.Function{..}) = f { Val.fExtra = fExtra { Val.feProto = False } }
-
-fun :: HasCallStack => String -> Ty.Ty -> Val.Symbol
-fun name sig = Val.Named name $ mkDecl $ defFunction { Val.fType = ptr sig }
-
-ghcfun :: HasCallStack => String -> Ty.Ty -> Val.Symbol
-ghcfun name sig = Val.Named name $ mkDef $ defFunction { Val.fType = ptr sig, Val.fCallingConv = CallingConv.GHC }
+instance Val.HasLinkage Result where
+  getLinkage (FunctionResult f _ _ _) = Val.getLinkage f
+  getLinkage (DataResult d _ _ _) = Val.getLinkage d
+  setLinkage l f@(FunctionResult{}) = f { _f = Val.setLinkage l (_f f) }
+  setLinkage l d@(DataResult{}) = d { _d = Val.setLinkage l (_d d) }
 
 -- | BasicBlocks
 block'' :: (HasCallStack, Monad m) => l -> EdslT m a -> EdslT m ((l, BasicBlockId), a)
@@ -121,18 +106,22 @@ defT :: (HasCallStack, Monad m)
      => String                             -- ^ The name of the function
      -> Ty.Ty                              -- ^ The function signature ([x] --> y)
      -> ([Val.Symbol] -> EdslT m a)        -- ^ The body generator (symbols are references to the functions arguments)
-     -> ExceptT Error m Func.Function
+     -> ExceptT Error m Result
 defT name sig body = ExceptT $ runBodyBuilderT' 0 $ runExceptT (body args)
   where args = map Val.Unnamed $ zipWith Val.Arg (Ty.teParamTy sig) [0..]
-        mkFunc :: [Func.BasicBlock] -> Func.Function
-        mkFunc = Func.Function (Val.Named name $ mkDef $ defFunction { Val.fType = ptr sig }) []
-        runBodyBuilderT' :: (Monad m, Functor f) => Int -> BodyBuilderT m (f a) -> m (f Func.Function)
+        mkFunc :: BodyBuilderResult -> Result
+        mkFunc res = FunctionResult
+                     (Func.Function (Val.Named name $ mkDef $ defFunction { Val.fType = ptr sig }) [] (_blocks res))
+                     (_globals res)
+                     (_consts res)
+                     (_labels res)
+        runBodyBuilderT' :: (Monad m, Functor f) => Int -> BodyBuilderT m (f a) -> m (f Result)
         runBodyBuilderT' i = fmap (\(a, s) -> fmap (const (mkFunc s)) a) . runBodyBuilderT i
 
-def :: HasCallStack => String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Either Error Func.Function
+def :: HasCallStack => String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Either Error Result
 def name sig = runIdentity . runExceptT .  defT name sig
 
-def_ :: HasCallStack => String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Func.Function
+def_ :: HasCallStack => String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Result
 def_ name sig body = case def name sig body of
   Left e -> error e
   Right f -> f
@@ -141,27 +130,55 @@ ghcdefT :: (HasCallStack, Monad m)
         => String
         -> Ty.Ty
         -> ([Val.Symbol] -> EdslT m a)
-        -> ExceptT Error m Func.Function
+        -> ExceptT Error m Result
 ghcdefT name sig body = ExceptT $ runBodyBuilderT' 0 $ runExceptT (body args)
   where args = map Val.Unnamed $ zipWith Val.Arg (Ty.teParamTy sig) [0..]
-        mkFunc :: [Func.BasicBlock] -> Func.Function
-        mkFunc = Func.Function (Val.Named name $ mkDef $ defFunction { Val.fType = ptr sig, Val.fCallingConv = CallingConv.GHC }) []
-        runBodyBuilderT' :: (Monad m, Functor f) => Int -> BodyBuilderT m (f a) -> m (f Func.Function)
+        mkFunc :: BodyBuilderResult -> Result
+        mkFunc res = FunctionResult
+                     (Func.Function (Val.Named name $ mkDef $ defFunction { Val.fType = ptr sig, Val.fCallingConv = CallingConv.GHC }) [] (_blocks res))
+                     (_globals res)
+                     (_consts res)
+                     (_labels res)
+        runBodyBuilderT' :: (Monad m, Functor f) => Int -> BodyBuilderT m (f a) -> m (f Result)
         runBodyBuilderT' i = fmap (\(a, s) -> fmap (const (mkFunc s)) a) . runBodyBuilderT i
 
-ghcdef :: HasCallStack => String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Either Error Func.Function
+ghcdef :: HasCallStack => String -> Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Either Error Result
 ghcdef name sig = runIdentity . runExceptT . ghcdefT name sig
 
 -- | Prefix Data
-withPrefixData :: HasCallStack => Val.Symbol -> Func.Function -> Func.Function
-withPrefixData dat f = f { Func.dSig = sig' }
+withPrefixData :: HasCallStack => Val.Symbol -> Result -> Result
+withPrefixData dat (FunctionResult f gs cs ls) = FunctionResult (f { Func.dSig = sig' }) gs cs ls
   where sig = Func.dSig f
         sig' = (\x -> x { Val.fExtra = (Val.fExtra x) { Val.fePrefixData = pure dat }}) <$> sig
 
+-- | withPrefixData, if the prefixdata needs to run in the Builder.
+withPrefixDataM :: (HasCallStack, Monad m) => EdslT m Val.Symbol -> Result -> ExceptT Error m Result
+withPrefixDataM prefixGen res = ExceptT $ runBodyBuilderT' (runExceptT prefixGen)
+  where
+    runBodyBuilderT' :: (Monad m, Functor f) => BodyBuilderT m (f Val.Symbol) -> m (f Result)
+    runBodyBuilderT' = fmap (\(a, s) -> fmap (addPrefixData res s) a) . runBodyBuilderT 0
+    addPrefixData :: Result -> BodyBuilderResult -> Val.Symbol -> Result
+    addPrefixData res prefixResult prefixData
+      = withPrefixData prefixData (res { _flabels = (_flabels res) ++ (_labels prefixResult)
+                                       , _fglobals = (_fglobals res) ++ (_globals prefixResult)})
+
+withPrefixDataM_ :: (HasCallStack) => Edsl Val.Symbol -> Result -> Result
+withPrefixDataM_ prefixGen res = case go prefixGen res of
+                                   Left e -> error e
+                                   Right f -> f
+  where go :: HasCallStack => Edsl Val.Symbol -> Result -> Either Error Result
+        go prefixGen = runIdentity . runExceptT . withPrefixDataM prefixGen
+
 -- | Module
-mod :: HasCallStack => String -> [Func.Function] -> Module
+mod :: HasCallStack => String -> [Result] -> Module
 mod name = mod' name []
-mod' :: HasCallStack => String -> [Val.Symbol] -> [Func.Function] -> Module
+
+-- | mod' module creation. This does the heavy lifting.
+mod' :: HasCallStack
+     => String           -- ^ Module name
+     -> [Result]         -- ^ module globals
+     -> [Result]         -- ^ module functions
+     -> Module
 mod' name modGlobals fns = Module
   { mVersion    = 1
   , mTriple     = Nothing
@@ -171,11 +188,22 @@ mod' name modGlobals fns = Module
   , mDecls = map (fmap mkDecl) refFns'
   , mFns = map updateFunction fns
   }
-  where globals = modGlobals ++ filter isGlobal (fsymbols [] fns)
+  where fns' = map _f fns
+        data' = map _d modGlobals
+
+        -- globals' = data' ++ filter isGlobal (fsymbols [] fns')
+        -- [TODO]: We are missing all the functions here. They
+        --         are not recorded int he globals. isGlobal though
+        --         triggers for Function, Global and Alias!
+        --
+        -- TODO  : so far only EDSL.fun and EDSL.ghcfun ahve been manually
+        --         turned into gellGlobal in the Gen.hs, this should happen
+        --         in the edsl, and thus be automatically enforced.
+        globals = sort . nub $ (map _d modGlobals) ++ (concatMap _dglobals modGlobals) ++ (concatMap _fglobals fns)
 
         -- defined functions
         defFns :: [Val.Symbol]
-        defFns = map Func.dSig fns
+        defFns = map Func.dSig fns'
         -- references functions, all those functions in the globals
         -- that are *not* defined functions.
         refFns :: [Val.Symbol]
@@ -187,6 +215,8 @@ mod' name modGlobals fns = Module
         -- All Values we have. Functions, References and global Values.
         allValues = defFns ++ refFns ++ globalValues
 
+        allFnConstants = filter isFnConstant allValues
+
         -- concrete values are those that are not labels
         concreteValues = filter (not . isLabel) allValues
 
@@ -194,9 +224,15 @@ mod' name modGlobals fns = Module
         namedValuesMap = [(n, s) | s@(Val.Named n _) <- concreteValues]
 
         -- labels references in globals (global, fn, alias)
-        topLevelLabels = filter isLabel . fsymbols [] $ allValues
+        -- topLevelLabels = filter isLabel . fsymbols [] $ allValues
         -- function body labels
-        labels = filter isLabel . fsymbols topLevelLabels $ fns
+--        labels' = filter isLabel . fsymbols topLevelLabels $ fns'
+        -- labels = filter isLabel . fsymbols topLevelLabels $ fns
+
+        -- [TODO] Turn _dlabels and _flabels into Sets. We won't need the
+        --        nub then anymore.
+        labels = nub . sort $ concatMap _dlabels modGlobals ++ concatMap _flabels fns
+
         -- compute the label map, as well as external globals for
         -- references symbols that are not foundin the namedValues.
         labelMap :: [(Val.Symbol, Val.Symbol)]
@@ -207,7 +243,7 @@ mod' name modGlobals fns = Module
                   -- we lower the type, as we lifted it during label generation,
                   -- and externls are going to be of lifted type anyway.  Thus
                   -- without lowering it would end up being lifted twice.
-                  Nothing -> let g = extGlobal n (lower t) in ((l,g):lm, g:gs)
+                  Nothing -> let g = extGlobal_ n (lower t) in ((l,g):lm, g:gs)
 
         -- now we have the labelMap, which maps a label to a symbol; however, the
         -- symbol may still contain labels.
@@ -243,16 +279,18 @@ mod' name modGlobals fns = Module
         --    a. collect all symbols (starting from the allValues), as we do not want them to be taken apart here.
         --    b. filter out allValues, as they are global and not function local.
         --    c. only take the constant symbols.
-        updateFunction f = f { -- replace lables in the function signature.
-                               Func.dSig   = replaceLabels labelMap' (Func.dSig f)
-                               -- build the constants list.
-                             , Func.dConst =   sort
-                                             . filter (\x -> not (x `elem` allValues))
-                                             . filter isFnConstant
-                                             $ fsymbols allValues body
-                               -- set the updated (with fixed lables) body.
-                             , Func.dBody  = body
-                             }
+        updateFunction :: Result -> Func.Function 
+        updateFunction (FunctionResult f gs cs ls)
+          = f { -- replace lables in the function signature.
+                Func.dSig   = replaceLabels labelMap' (Func.dSig f)
+                -- build the constants list.
+              , Func.dConst =   sort
+                                . filter (\x -> not (x `elem` allFnConstants))
+                                . filter isFnConstant
+                                $ nub cs
+                -- set the updated (with fixed lables) body.
+              , Func.dBody  = body
+              }
           where
             body :: [Func.BasicBlock]
             body = map (Func.bimap (Func.imap (updateInst fixFunction labelMap'))) (Func.dBody f)

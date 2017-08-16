@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 
 module EDSL.Instructions where
 
@@ -5,6 +6,12 @@ import Prelude hiding (error)
 
 import EDSL.Monad
 import EDSL.Types
+import EDSL.Values (label_, global_, extGlobal_
+                   ,cStrS_, strS_
+                   ,int_, int8_, int16_, int32_, int64_
+                   ,float_, float16_, float32_, float64_, float80_, float128_
+                   ,undefS_
+                   ,fun_, ghcfun_)
 
 import Data.BitCode.LLVM.Classes.HasType
 
@@ -30,13 +37,14 @@ import qualified Data.BitCode.LLVM.CallingConv     as CConv
 import qualified Data.BitCode.LLVM.Util            as Util
 import qualified Data.BitCode.LLVM.RMWOperations   as RMWOp
 
-import Data.BitCode.LLVM.Pretty
-import Text.PrettyPrint
+import Data.BitCode.LLVM.Pretty as P
+import Text.PrettyPrint as P
 
 import Control.Monad.Trans.Class (MonadTrans, lift)
-import Control.Monad.Trans.Except (ExceptT(..), throwE)
+import Control.Monad.Trans.Except (ExceptT(..), throwE, runExceptT)
 import Control.Monad ((<=<), (>=>))
 import Data.Functor.Identity (Identity)
+
 
 import GHC.Stack
 import Data.Word (Word64)
@@ -46,6 +54,12 @@ type Inst = Either Error Inst.Inst
 
 type EdslT m a = ExceptT Error (BodyBuilderT m) a
 type Edsl a = ExceptT Error (BodyBuilderT Identity) a
+
+--      runExceptT :: ExceptT e m a -> m (Either e a)
+-- runBodyBuilderT :: Int -> BodyBuilderT m a -> m (a, BodyBuilderResult)
+
+runEdslT :: Monad m => Int -> EdslT m a -> m (Either Error (a, BodyBuilderResult))
+runEdslT i = fmap (\(a, b) -> fmap (,b) a) . runBodyBuilderT i . runExceptT
 
 serror = Left . show
 exceptT :: Monad m => Either Error a -> EdslT m a
@@ -220,6 +234,54 @@ xorC  lhs rhs = mkConstBinOp BinOp.XOR  lhs rhs
 --------------------------------------------------------------------------------
 -- Monadic interface (BodyBuilder)
 -- | Intructions
+
+-- | create a typed label to be resolved later.
+label :: (HasCallStack, Monad m) => String -> Ty -> EdslT m Symbol
+label name = lift . tellLabel . label_ name
+
+-- | Globals (tracked in the monad)
+global :: (HasCallStack, Monad m) => String -> Symbol -> EdslT m Symbol
+global name = lift . tellGlobal . global_ name
+
+extGlobal :: (HasCallStack, Monad m) => String -> Ty -> EdslT m Symbol
+extGlobal name = lift . tellGlobal . extGlobal_ name
+
+fun :: (HasCallStack, Monad m) => String -> Ty -> EdslT m Symbol
+fun name = lift . tellGlobal . fun_ name
+
+ghcfun :: (HasCallStack, Monad m) => String -> Ty -> EdslT m Symbol
+ghcfun name = lift . tellGlobal . ghcfun_ name
+
+-- | Constants (tracked in the monad)
+-- | @cStr@ creates a null terminated c string.
+cStr :: (HasCallStack, Monad m) => String -> EdslT m Symbol
+cStr = lift . tellConst . cStrS_
+
+-- | @str@ creates a string, non-@\0@ terminated.
+str :: (HasCallStack, Monad m) => String -> EdslT m Symbol
+str = lift . tellConst . strS_
+
+int :: (HasCallStack, Monad m, Integral a) => Int -> a -> EdslT m Symbol
+int w = lift . tellConst . int_ w
+int8, int16, int32, int64 :: (HasCallStack, Monad m, Integral a) => a -> EdslT m Symbol
+int8 = lift . tellConst . int8_
+int16 = lift . tellConst . int16_
+int32 = lift . tellConst . int32_
+int64 = lift . tellConst . int64_
+
+float :: (HasCallStack, Monad m) => Int -> Rational -> EdslT m Symbol
+float w = lift . tellConst . float_ w
+float16, float32, float64, float80, float128 :: (HasCallStack, Monad m) => Rational -> EdslT m Symbol
+float16 = lift . tellConst . float16_
+float32 = lift . tellConst . float32_
+float64 = lift . tellConst . float64_
+float80 = lift . tellConst . float80_
+float128 = lift . tellConst . float128_
+
+undef :: (HasCallStack, Monad m) => Ty -> EdslT m Symbol
+undef = lift . tellConst . undefS_
+
+-- | Instructions
 tellInst'' x = exceptT x >>= lift . tellInst'
 
 alloca :: (HasCallStack, Monad m) => Ty -> Symbol -> EdslT m Symbol
@@ -240,8 +302,8 @@ call' tck cc f args
   -- TODO: length should be equal, if not vararg.
   | length args < length (funParamTys (ty f))
   = sthrowE $ text "Cannot call: " <+> (pretty f <+> text "with insufficent arguments."
-                                              $+$ text "Params" <+> int (length (funParamTys (ty f))) <> text ":" <+> pretty (funParamTys (ty f))
-                                              $+$ text "Args  " <+> int (length args) <> text ":" <+> pretty args)
+                                              $+$ text "Params" <+> P.int (length (funParamTys (ty f))) <> text ":" <+> pretty (funParamTys (ty f))
+                                              $+$ text "Args  " <+> P.int (length args) <> text ":" <+> pretty args)
   | not . Prelude.and $ zipWith (==) (map ty args) (funParamTys (ty f))
   = sthrowE $ text "Cannot call: " <+> (pretty f <+> text "text with arguments, not matching the signature."
                                              $+$ text "Sig :" <+> pretty (funParamTys (ty f))

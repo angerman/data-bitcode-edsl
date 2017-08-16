@@ -1,3 +1,4 @@
+{-# LANGUAGE RecordWildCards #-}
 module EDSL.Values where
 
 import EDSL.Types
@@ -55,30 +56,35 @@ defFunction = Val.Function void defCC defLinkage 0 0 0 defVisibility 0 False def
 defAlias    = Val.Alias void 0 defSymbol defLinkage defVisibility defTLM False defStorageClass
 
 -- * Constant Values
-cStr s = Val.Constant (arr (1 + length s) i8) (v_cStr s)
-str s = Val.Constant (arr (length s) i8) (v_str s)
+cStr_ s = Val.Constant (arr (1 + length s) i8) (v_cStr s)
+str_ s = Val.Constant (arr (length s) i8) (v_str s)
 
 -- * Constant Symbols
-int w = Val.Unnamed . Val.Constant (i w) . v_int . fromIntegral
-int8  = Val.Unnamed . Val.Constant i8 . v_int
-int32 = Val.Unnamed . Val.Constant i32 . v_int
-int64 = Val.Unnamed . Val.Constant i64 . v_int
+int_ :: Integral a => Int -> a -> Val.Symbol
+int_ w = Val.Unnamed . Val.Constant (i w) . v_int . fromIntegral
+int8_, int16_, int32_, int64_ :: Integral a => a -> Val.Symbol
+int8_  = Val.Unnamed . Val.Constant i8 . v_int . fromIntegral
+int16_ = Val.Unnamed . Val.Constant i16 . v_int . fromIntegral
+int32_ = Val.Unnamed . Val.Constant i32 . v_int . fromIntegral
+int64_ = Val.Unnamed . Val.Constant i64 . v_int . fromIntegral
 
-float w = Val.Unnamed . Val.Constant (f w) . (v_float w) . fromRational
-float16 = float 16
-float32 = float 32
-float64 = float 64
-float80 = float 80
-float128 = float 128
+float_ :: Int -> Rational -> Val.Symbol
+float_ w = Val.Unnamed . Val.Constant (f w) . (v_float w) . fromRational
+float16_, float32_, float64_, float80_, float128_ :: Rational -> Val.Symbol
+float16_ = float_ 16
+float32_ = float_ 32
+float64_ = float_ 64
+float80_ = float_ 80
+float128_ = float_ 128
 
-undef :: Ty.Ty -> Val.Value
-undef = flip Val.Constant Val.Undef
+undef_ :: Ty.Ty -> Val.Value
+undef_ = flip Val.Constant Val.Undef
 
-undefS :: Ty.Ty -> Val.Symbol
-undefS = Val.Unnamed . undef
+undefS_ :: Ty.Ty -> Val.Symbol
+undefS_ = Val.Unnamed . undef_
 
-cStrS = Val.Unnamed . cStr
-strS  = Val.Unnamed . str
+cStrS_ = Val.Unnamed . cStr_
+strS_  = Val.Unnamed . str_
 
 -- unpacked struct constant
 -- | Construct a struct value.
@@ -87,3 +93,33 @@ struct' ss = Val.Constant (ustruct $ map ty ss) (Val.Struct ss)
 -- | Construct a struct symbol (unnamed value)
 struct :: [Val.Symbol] -> Val.Symbol
 struct = Val.Unnamed . struct'
+
+-- | low level lable creator. Do not use this in the
+-- Body Builder. If you must, call tellLabel on it. Use
+-- the @label@ from the Instructions.
+label_ :: String -> Ty.Ty -> Val.Symbol
+label_ name = Val.Named name . Val.Label
+
+-- | create a global constant
+global_ :: String -> Val.Symbol -> Val.Symbol
+global_ name val = Val.Named name $ defGlobal { Val.gPointerType = ptr (ty val)
+                                              , Val.gInit = Just val }
+-- | create an external global constant. That is one which has no initializer.
+extGlobal_ :: String -> Ty.Ty -> Val.Symbol
+extGlobal_ name ty = Val.Named name $ defGlobal { Val.gPointerType = ptr ty }
+
+
+-- | Mark a function as a declaration (Prototype)
+mkDecl :: Val.Value -> Val.Value
+mkDecl f@(Val.Function{..}) = f { Val.fExtra = fExtra { Val.feProto = True } }
+
+-- | Mark a function as a definition (non Prototype)
+mkDef :: Val.Value -> Val.Value
+mkDef f@(Val.Function{..}) = f { Val.fExtra = fExtra { Val.feProto = False } }
+
+fun_ :: String -> Ty.Ty -> Val.Symbol
+fun_ name sig = Val.Named name $ mkDecl $ defFunction { Val.fType = ptr sig }
+
+ghcfun_ :: String -> Ty.Ty -> Val.Symbol
+ghcfun_ name sig = Val.Named name $ mkDef $ defFunction { Val.fType = ptr sig, Val.fCallingConv = CallingConv.GHC }
+

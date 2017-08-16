@@ -13,6 +13,7 @@ i = Ty.Int . fromIntegral
 i1, i8, i32, i8ptr, i32ptr :: Ty.Ty
 i1 = i 1
 i8 = i 8
+i16 = i 16
 i32 = i 32
 i64 = i 64
 i8ptr = ptr i8

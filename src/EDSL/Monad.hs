@@ -1,12 +1,16 @@
 {-# LANGUAGE LambdaCase, GeneralizedNewtypeDeriving #-}
 module EDSL.Monad
-  (BodyBuilderT, BodyBuilder
+  (BodyBuilderT, BodyBuilder, BodyBuilderResult(..)
   , runBodyBuilderT
   , execBodyBuilderT
   , execBodyBuilder
   , tellInst
   , tellInst'
   , tellNewBlock
+  -- * Labels and Globals
+  , tellLabel
+  , tellGlobal
+  , tellConst
   -- * Debugging
   , askInsts
   , tellLog
@@ -38,7 +42,23 @@ import Control.Monad.Trans.Class
 -- and we need to provide some form of unique symbol supply
 -- the simples being a counter.
 
-data FnCtx = FnCtx { nInst :: Int, nRef :: Int, nBlocks :: Int, blocks :: [Func.BasicBlock], _log :: [String], _insts :: [Inst.Inst] } deriving Show
+data FnCtx = FnCtx
+  { nInst :: Int
+  , nRef :: Int
+  , nBlocks :: Int
+  , blocks :: [Func.BasicBlock]
+  -- extracing globals and labels
+  -- after building them up from the
+  -- function blocks is too expensive.
+  -- Therefore we collect Globals and
+  -- Labels during the construction.
+  , globals :: [Val.Symbol]
+  , consts :: [Val.Symbol]
+  , labels :: [Val.Symbol]
+  -- logging facilities
+  , _log :: [String]
+  , _insts :: [Inst.Inst]
+  } deriving Show
 -- instance Monoid FnCtx where
 --   mempty = FnCtx 0 0 mempty
 --   (FnCtx is bs bbs) `mappend` (FnCtx is' bs' bbs') = FnCtx (is + is') (bs + bs') (bbs `mappend` shift is bs bbs')
@@ -58,6 +78,13 @@ data FnCtx = FnCtx { nInst :: Int, nRef :: Int, nBlocks :: Int, blocks :: [Func.
 newtype BodyBuilderT m a = BodyBuilderT { unBodyBuilderT :: StateT FnCtx m a }
   deriving (Functor, Applicative, Monad, MonadTrans, MonadFix, MonadIO)
 
+data BodyBuilderResult = BBR
+  { _blocks :: [Func.BasicBlock]
+  , _globals :: [Val.Symbol]
+  , _consts :: [Val.Symbol]
+  , _labels :: [Val.Symbol] }
+  deriving (Show)
+
 type BodyBuilder a = BodyBuilderT Identity a
 
 modifyCtx :: Monad m => (FnCtx -> FnCtx) -> BodyBuilderT m ()
@@ -66,16 +93,18 @@ getsCtx :: Monad m => (FnCtx -> a) -> BodyBuilderT m a
 getsCtx = BodyBuilderT . gets
 
 -- mapping over blocks
-runBodyBuilderT :: Monad m => Int -> BodyBuilderT m a -> m (a, [Func.BasicBlock])
-runBodyBuilderT instOffset = fmap (\(a, s) -> (a, reverseBlocks s)) . flip runStateT (FnCtx instOffset 0 0 mempty mempty mempty) . unBodyBuilderT
+runBodyBuilderT :: Monad m => Int -> BodyBuilderT m a -> m (a, BodyBuilderResult)
+runBodyBuilderT instOffset = fmap mkResult . flip runStateT (FnCtx instOffset 0 0 mempty mempty mempty mempty mempty mempty) . unBodyBuilderT
   where
+    mkResult :: (a, FnCtx) -> (a, BodyBuilderResult)
+    mkResult (a, s) = (a, BBR (reverseBlocks s) (reverse (globals s)) (reverse (consts s)) (reverse (labels s)))
     reverseBlocks :: FnCtx -> [Func.BasicBlock]
     reverseBlocks = map (Func.bbmap reverse) . reverse . blocks
 
-execBodyBuilderT :: Monad m => Int -> BodyBuilderT m a -> m [Func.BasicBlock]
+execBodyBuilderT :: Monad m => Int -> BodyBuilderT m a -> m BodyBuilderResult
 execBodyBuilderT instOffset = fmap snd . runBodyBuilderT instOffset
 
-execBodyBuilder :: Int -> BodyBuilderT Identity a -> [Func.BasicBlock]
+execBodyBuilder :: Int -> BodyBuilderT Identity a -> BodyBuilderResult
 execBodyBuilder instOffset = runIdentity . execBodyBuilderT instOffset
 
 
@@ -103,7 +132,23 @@ askInsts n = do
     blockInsts :: Func.BasicBlock -> [Func.BlockInst]
     blockInsts (Func.BasicBlock is) = is
     blockInsts (Func.NamedBlock _ is) = is
-  
+
+
+tellLabel :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellLabel l = do
+  modifyCtx (\ctx -> ctx { labels = l:labels ctx })
+  return l
+
+tellGlobal :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellGlobal g = do
+  modifyCtx (\ctx -> ctx { globals = g:globals ctx })
+  return g
+
+tellConst :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellConst c = do
+  modifyCtx (\ctx -> ctx { consts = c:consts ctx })
+  return c
+
 -- | Add an instruction to the current block.
 -- returns @Just ref@ if the instruction retuns
 -- a value. @Nothing@ if the instruction has no result.

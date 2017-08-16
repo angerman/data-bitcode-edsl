@@ -10,8 +10,11 @@ helloWorld = mod "helloWorld"
         ret =<< arg0 `mul` arg0
   , def_ "main" ([i32, ptr i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
-        strPtr  <- gep (global "foo" (cStr "hello world, %d\n")) [int32 0, int32 0]
-        Just sq <- ccall (fun "square" ([i32] --> i32)) [int32 3]
-        ccall (fun "printf" (vararg $ [i8ptr] --> i32)) [strPtr, sq]
-        ret $ int32 0
+        foo <- global "foo" =<< (cStr "hello world, %d\n") 
+        strPtr  <- gep foo =<< sequence [int32 0, int32 0]
+        square <- fun "square" ([i32] --> i32) 
+        Just sq <- ccall square =<< sequence [int32 3]
+        f <- fun "printf" (vararg $ [i8ptr] --> i32)
+        ccall f [strPtr, sq]
+        ret =<< int32 0
   ]
