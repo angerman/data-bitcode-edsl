@@ -4,6 +4,7 @@ module EDSL.Monad.Instructions
   ,module EDSL.Monad.Instructions.Compare
   ,module EDSL.Monad.Instructions.Binary
   ,module EDSL.Monad.Instructions.Atomic
+  ,module EDSL.Monad.Instructions.Constant
   ,alloca, load, store
   ,call', call, ccall, tailcall, ghccall, tailghccall
   ,ret, retVoid
@@ -15,6 +16,7 @@ module EDSL.Monad.Instructions
 import EDSL.Monad.EdslT
 
 import EDSL.Monad.Types
+import EDSL.Monad.Instructions.Constant
 import EDSL.Monad.Instructions.Cast
 import EDSL.Monad.Instructions.Compare
 import EDSL.Monad.Instructions.Binary
@@ -100,8 +102,8 @@ retVoid = tellInst (Inst.Ret Nothing) >> pure ()
 ubr :: Monad m => BasicBlockId -> EdslT m (Maybe Symbol)
 ubr = tellInst . Inst.UBr
 br :: Monad m => Symbol -> BasicBlockId -> BasicBlockId -> EdslT m (Maybe Symbol)
-br cond l r | isBoolTy (ty cond) = tellInst (Inst.Br cond l r)
-            | otherwise          = sthrowE $ text "Cannot branch with " <+> pretty cond <+> text " condition. Must be i1 (Bool)"
+br cond l r | isBoolTy cond = tellInst (Inst.Br cond l r)
+            | otherwise     = sthrowE $ text "Cannot branch with " <+> pretty cond <+> text " condition. Must be i1 (Bool)"
             
 switch :: Monad m => Symbol -> BasicBlockId -> [(Symbol, BasicBlockId)] -> EdslT m (Maybe Symbol)
 switch cond def cases = tellInst (Inst.Switch cond def cases)

@@ -51,6 +51,7 @@ library
       EDSL.Monad.Instructions.Binary
       EDSL.Monad.Instructions.Compare
       EDSL.Monad.Instructions.Atomic
+      EDSL.Monad.Instructions.Constant
   default-language: Haskell2010
 
 test-suite spec

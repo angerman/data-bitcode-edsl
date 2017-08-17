@@ -2,13 +2,15 @@
 {-# LANGUAGE TupleSections #-}
 module EDSL.Monad.EdslT
   (
+    M.BodyBuilderT
   -- EdslT
-    Error, Inst
+  , Error, Inst
   , EdslT, Edsl
-  , runEdslT
+  , runEdslT, evalEdslT
   , serror, sthrowE, exceptT
   , tellLabel, tellGlobal, tellType, tellConst
   , tellInst, tellInst'
+  , askBlocks, askLabels, askConsts, askGlobals, askTypes
   )
   where
 
@@ -21,6 +23,9 @@ import Data.Functor.Identity (Identity)
 import Data.BitCode.LLVM.Pretty (pretty)
 import Data.BitCode.LLVM.Value (Symbol)
 import Data.BitCode.LLVM.Type  (Ty)
+import Data.BitCode.LLVM.Function (BasicBlock)
+
+import Data.Set (Set)
 
 type Error = String
 type Inst = Either Error Inst.Inst
@@ -33,6 +38,9 @@ type Edsl a = ExceptT Error (M.BodyBuilderT Identity) a
 
 runEdslT :: Monad m => Int -> EdslT m a -> m (Either Error (a, M.BodyBuilderResult))
 runEdslT i = fmap (\(a, b) -> fmap (,b) a) . M.runBodyBuilderT i . runExceptT
+
+evalEdslT :: Monad m => Int -> EdslT m a -> m (Either Error a)
+evalEdslT i = M.evalBodyBuilderT i . runExceptT
 
 serror :: (Show a) => a -> Inst
 serror = Left . show
@@ -59,3 +67,13 @@ tellInst :: Monad m => Inst.Inst -> EdslT m (Maybe Symbol)
 tellInst = lift . M.tellInst
 tellInst' :: Monad m => Inst.Inst -> EdslT m Symbol
 tellInst' = lift . M.tellInst'
+
+-- [TODO]: newtype?
+askBlocks :: Monad m => EdslT m [BasicBlock]
+askBlocks = lift M.askBlocks
+askLabels, askConsts, askGlobals :: Monad m => EdslT m (Set Symbol)
+askLabels = lift M.askLabels
+askConsts = lift M.askConsts
+askGlobals = lift M.askGlobals
+askTypes :: Monad m => EdslT m (Set Ty)
+askTypes = lift M.askTypes

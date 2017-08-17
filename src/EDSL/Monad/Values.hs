@@ -6,7 +6,7 @@ module EDSL.Monad.Values where
 import EDSL.Monad.EdslT
 import EDSL.Monad.Types
 
-import Data.BitCode.LLVM.Type (Ty)
+import Data.BitCode.LLVM.Type (Ty, isPtr)
 import Data.BitCode.LLVM.Value
 import Data.BitCode.LLVM.CallingConv (CallingConv)
 import Data.BitCode.LLVM.Classes.HasType
@@ -65,7 +65,8 @@ extGlobal name ty = tellGlobal . Named name =<< defGlobal <$> (ptr ty)
 
 -- | INTERNAL: this will *not* record the type, nor the created global.
 extGlobal_ :: HasCallStack => String -> Ty -> Symbol
-extGlobal_ name ty = Named name (defGlobal ty)
+extGlobal_ name ty | isPtr ty = Named name (defGlobal ty)
+                   | otherwise = error $ "ty " ++ show ty ++ " must be ptr for global " ++ show name 
 
 fun :: (HasCallStack, Monad m) => String -> Ty -> EdslT m Symbol
 fun name sig = tellGlobal . Named name =<< mkDecl . defFunction <$> ptr sig

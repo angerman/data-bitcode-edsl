@@ -244,10 +244,9 @@ mod' name modGlobals fns = Module
         (labelMap, extGlobals) = foldl f ([],[]) labels
           where f (lm, gs) l@(Val.Named n (Val.Label t)) = case lookup n namedValuesMap of
                   Just s  -> ((l,s):lm, gs)
-                  -- we lower the type, as we lifted it during label generation,
-                  -- and externls are going to be of lifted type anyway.  Thus
-                  -- without lowering it would end up being lifted twice.
-                  Nothing -> let g = extGlobal_ n (lower t) in ((l,g):lm, g:gs)
+                  -- note that @extGlobal_@ takes the type verbatim. As
+                  -- opposed to @extGlobal@, which lifts it.
+                  Nothing -> let g = extGlobal_ n t in ((l,g):lm, g:gs)
 
         -- now we have the labelMap, which maps a label to a symbol; however, the
         -- symbol may still contain labels.

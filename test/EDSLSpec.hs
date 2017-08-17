@@ -67,7 +67,7 @@ spec_edsl = do
           testModule = mod "cmp-ret"
             [ def_ "main" ([i32, ptr =<< i8ptr] --> i1) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
-                  ret =<< (pure argc :: Edsl Symbol) `iult` (int32 2)
+                  ret =<< (pure argc) `iultM` (int32 2)
                 pure ()
             ]
       -- To debug the module use the following.

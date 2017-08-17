@@ -4,33 +4,31 @@ module EDSL.Example.HelloBranch where
 
 import Prelude hiding (mod)
 import EDSL
-import EDSL.Monad.Instructions
 import EDSL.Monad.EdslT
-import EDSL.Monad.Values
 
 import Text.PrettyPrint (Doc)
 import Data.BitCode.LLVM.Pretty
 import Data.BitCode.LLVM.Classes.HasType (ty)
 import Data.Maybe
+import Data.BitCode.LLVM (Module)
 
 import Data.BitCode.LLVM.Types (BasicBlockId)
-import Data.BitCode.LLVM.Util (lift)
 -- import EDSL.Monad (BodyBuilder)
 
 -- reexport pretty (to make intero happy :-))
 pp :: (Pretty a) => a -> Doc
 pp = pretty
 
+helloBranch, helloBranch2, helloPtrFn, helloWorld, gepFun, binOpFun, prefixDataFun :: Module
 
 helloBranch = mod "helloWorld"
-  [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+  [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, _argv ] -> mdo
       block "entry" $ do
         constOne <- int32 1
         cond <- argc `iugt` constOne 
         br cond one two
       one <- block "one" $ do
-        one <- global "one" =<< cStr "One" 
-        strPtr <- gep one =<< sequence [int32 0, int32 0]
+        strPtr <- bind2 gep (global "one" =<< cStr "One") (sequence [int32 0, int32 0])
         puts <- fun "puts" =<< [i8ptr] --> i32
         ccall puts [strPtr]
         ret =<< int32 0
@@ -138,5 +136,6 @@ prefixDataFun = mod "prefixData"
   ]
   where prefix = struct =<< sequence [(int32 1), (int32 10)]
 
+testWrite, testWrite2 :: IO ()
 testWrite = writeModule "helloPtrFn.bc" helloPtrFn
 testWrite2 = writeModule "binOpFun.bc" binOpFun

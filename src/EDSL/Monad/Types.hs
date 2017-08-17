@@ -62,7 +62,20 @@ pstruct = tellType . StructAnon True
 (-->) :: Monad m => [EdslT m Ty] -> EdslT m Ty -> EdslT m Ty
 ts --> t = tellType =<< Function False <$> t <*> sequence ts
 
+(++>) :: Monad m => [Ty] -> Ty -> EdslT m Ty
+ts ++> t = tellType (Function False t ts)
+
 vararg :: Monad m => EdslT m Ty -> EdslT m Ty
 vararg f = tellType =<< vararg' <$> f
   where vararg' :: Ty -> Ty
         vararg' f@(Function{}) = f { teVarArg = True }
+
+size :: Integral a => a -> Ty -> a
+size _ (Int n)       = fromIntegral n
+size _ Half          = 16
+size _ Float         = 32
+size _ Double        = 64
+size _ X86Fp80       = 80
+size _ Fp128         = 128
+size ptrSize (Ptr{}) = ptrSize
+size _ t                = error $ "size not supported for " ++ show t

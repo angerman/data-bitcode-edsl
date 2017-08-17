@@ -1,8 +1,8 @@
 {-# LANGUAGE TupleSections #-}
 
-module EDSL.Instructions where
+module EDSL.Monad.Instructions.Constant where
 
-import Prelude hiding (error)
+--import Prelude hiding (error)
 
 import EDSL.Monad.EdslT
 
@@ -54,7 +54,7 @@ siToFpC     t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.SITOFP s
 fpTruncC    t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.FPTRUNC s
 fpExtC      t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.FPEXT s
 ptrToIntC   t s | isPtr (ty s) = pure $  Unnamed . Constant t $ Const.Cast t CastOp.PTRTOINT s
-                | otherwise    = serror $ text "Cannot ptr-to-int cast: " <+> pretty s <+> text "to" <+> pretty t <+> text ", symbol not a pointer!"
+                | otherwise    = error . show $ text "Cannot ptr-to-int cast: " <+> pretty s <+> text "to" <+> pretty t <+> text ", symbol not a pointer!"
 intToPtrC   t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.INTTOPTR s
 bitcastC    t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.BITCAST s
 addrSpCastC t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.ADDRSPACECAST s
@@ -64,9 +64,9 @@ addC, subC, mulC, udivC, sdivC, uremC, sremC, shlC, lshrC, ashrC, andC, orC, xor
 mkConstBinOp :: HasCallStack => BinOp.BinOp -> Symbol -> Symbol -> Either Error Symbol
 -- TODO: verify that both are Constants!
 mkConstBinOp op lhs rhs | ty lhs == ty rhs = pure $ Unnamed (Constant (ty lhs) $ Const.BinOp op lhs rhs)
-                        | otherwise = serror $ text "*** Type Error:" <+> (text ("BINOP (" ++ show op ++ "), types do not agree")
-                                                                           $+$ text "LHS:" <+> pretty lhs
-                                                                           $+$ text "RHS:" <+> pretty rhs)
+                        | otherwise = error . show $ text "*** Type Error:" <+> (text ("BINOP (" ++ show op ++ "), types do not agree")
+                                                                                 $+$ text "LHS:" <+> pretty lhs
+                                                                                 $+$ text "RHS:" <+> pretty rhs)
 addC  lhs rhs = mkConstBinOp BinOp.ADD  lhs rhs
 subC  lhs rhs = mkConstBinOp BinOp.SUB  lhs rhs
 mulC  lhs rhs = mkConstBinOp BinOp.MUL  lhs rhs
