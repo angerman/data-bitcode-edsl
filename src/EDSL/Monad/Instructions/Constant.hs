@@ -18,7 +18,7 @@ import Data.BitCode.LLVM.CallingConv (CallingConv)
 import Data.BitCode.LLVM.RMWOperations (RMWOperations)
 import Data.BitCode.LLVM.Codes.AtomicOrdering (AtomicOrdering)
 import Data.BitCode.LLVM.Codes.SynchronizationScope (AtomicSynchScope)
-
+import Data.BitCode.LLVM.Opcodes.Cast (CastOp)
 
 import qualified Data.BitCode.LLVM.Instruction     as Inst
 import qualified Data.BitCode.LLVM.Value           as Const (Const(..))
@@ -43,28 +43,32 @@ import GHC.Stack
 import Data.Word (Word64)
 
 -- ** Constant Cast Op
-truncC, zextC, sextC, fpToUiC, fpToSiC, uiToFpC, siToFpC, fpTruncC, fpExtC, ptrToIntC, intToPtrC, bitcastC, addrSpCastC :: HasCallStack => Ty -> Symbol -> Either Error Symbol
-truncC      t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.TRUNC s
-zextC       t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.ZEXT s
-sextC       t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.SEXT s
-fpToUiC     t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.FPTOUI s
-fpToSiC     t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.FPTOSI s
-uiToFpC     t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.UITOFP s
-siToFpC     t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.SITOFP s
-fpTruncC    t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.FPTRUNC s
-fpExtC      t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.FPEXT s
-ptrToIntC   t s | isPtr (ty s) = pure $  Unnamed . Constant t $ Const.Cast t CastOp.PTRTOINT s
-                | otherwise    = error . show $ text "Cannot ptr-to-int cast: " <+> pretty s <+> text "to" <+> pretty t <+> text ", symbol not a pointer!"
-intToPtrC   t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.INTTOPTR s
-bitcastC    t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.BITCAST s
-addrSpCastC t s = pure $ Unnamed . Constant t $ Const.Cast t CastOp.ADDRSPACECAST s
+truncC, zextC, sextC, fpToUiC, fpToSiC, uiToFpC, siToFpC, fpTruncC, fpExtC, ptrToIntC, intToPtrC, bitcastC, addrSpCastC
+  :: (Monad m, HasCallStack) => Ty -> Symbol -> EdslT m Symbol
+mkConstCast :: (Monad m, HasCallStack) => CastOp -> Ty -> Symbol -> EdslT m Symbol
+mkConstCast op t = tellConst . Unnamed . Constant t . Const.Cast t op
+truncC      t = mkConstCast CastOp.TRUNC t
+zextC       t = mkConstCast CastOp.ZEXT t
+sextC       t = mkConstCast CastOp.SEXT t
+fpToUiC     t = mkConstCast CastOp.FPTOUI t
+fpToSiC     t = mkConstCast CastOp.FPTOSI t
+uiToFpC     t = mkConstCast CastOp.UITOFP t
+siToFpC     t = mkConstCast CastOp.SITOFP t
+fpTruncC    t = mkConstCast CastOp.FPTRUNC t
+fpExtC      t = mkConstCast CastOp.FPEXT t
+ptrToIntC   t s | isPtr (ty s) = mkConstCast CastOp.PTRTOINT t s
+                | otherwise    = throwE . show $ text "Cannot ptr-to-int cast: " <+> pretty s <+> text "to" <+> pretty t <+> text ", symbol not a pointer!"
+intToPtrC   t = mkConstCast CastOp.INTTOPTR t
+bitcastC    t = mkConstCast CastOp.BITCAST t
+addrSpCastC t = mkConstCast CastOp.ADDRSPACECAST t
 
 -- ** Constant Binary Op
-addC, subC, mulC, udivC, sdivC, uremC, sremC, shlC, lshrC, ashrC, andC, orC, xorC :: HasCallStack => Symbol -> Symbol -> Either Error Symbol
-mkConstBinOp :: HasCallStack => BinOp.BinOp -> Symbol -> Symbol -> Either Error Symbol
+addC, subC, mulC, udivC, sdivC, uremC, sremC, shlC, lshrC, ashrC, andC, orC, xorC
+  :: (Monad m, HasCallStack) => Symbol -> Symbol -> EdslT m Symbol
+mkConstBinOp :: (Monad m, HasCallStack) => BinOp.BinOp -> Symbol -> Symbol -> EdslT m Symbol
 -- TODO: verify that both are Constants!
-mkConstBinOp op lhs rhs | ty lhs == ty rhs = pure $ Unnamed (Constant (ty lhs) $ Const.BinOp op lhs rhs)
-                        | otherwise = error . show $ text "*** Type Error:" <+> (text ("BINOP (" ++ show op ++ "), types do not agree")
+mkConstBinOp op lhs rhs | ty lhs == ty rhs = tellConst (Unnamed (Constant (ty lhs) $ Const.BinOp op lhs rhs))
+                        | otherwise = throwE . show $ text "*** Type Error:" <+> (text ("BINOP (" ++ show op ++ "), types do not agree")
                                                                                  $+$ text "LHS:" <+> pretty lhs
                                                                                  $+$ text "RHS:" <+> pretty rhs)
 addC  lhs rhs = mkConstBinOp BinOp.ADD  lhs rhs
