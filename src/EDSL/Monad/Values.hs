@@ -92,7 +92,7 @@ str s = tellConst =<< uconst <$> (arr (length s) =<< i8) <*> pure (String s)
 -- unpacked struct constant
 -- | Construct a struct symbol (unnamed value)
 struct :: (HasCallStack, Monad m) => [Symbol] -> EdslT m Symbol
-struct ss = uconst <$> (ustruct $ map ty ss) <*> pure (Struct ss)
+struct ss = tellConst =<< uconst <$> (ustruct $ map ty ss) <*> pure (Struct ss)
 
 int :: (HasCallStack, Monad m, Integral a, Integral b) => a -> b -> EdslT m Symbol
 int w n = tellConst =<< uconst <$> (i w) <*> pure (Int (fromIntegral n))
