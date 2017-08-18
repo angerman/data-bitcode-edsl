@@ -34,6 +34,7 @@ import Data.BitCode.LLVM.Type  (Ty, subTypes)
 import Data.BitCode.LLVM.Classes.ToSymbols
 
 import Data.List (sort, nub)
+import qualified Data.Set as Set
 
 parseFile :: FilePath -> IO ()
 parseFile f = readFile f >>= \case
@@ -77,7 +78,7 @@ testToSymbols f = testParse f >>= \case
 
 testToNBitCode :: [NBitCode]
 testToNBitCode = toBitCode (Just (Ident "TinyBitCode" Current),
-                            (Module 1 Nothing Nothing [] [] []))
+                            (Module 1 Nothing Nothing [] [] [] Set.empty Set.empty))
 
 testToBitCode :: [BitCode]
 testToBitCode = map denormalize $ testToNBitCode

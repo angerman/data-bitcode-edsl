@@ -60,6 +60,8 @@ import Debug.Trace
 
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Data.Map (Map)
+import qualified Data.Map as Map
 import Data.List (sort, nub)
 import Data.Maybe (fromMaybe)
 import Control.Applicative ((<|>))
@@ -191,6 +193,8 @@ mod' name modGlobals fns = Module
   -- TODO: This is looks aweful. However we ended up with non prototype fn's here. :(
   , mDecls = map (fmap mkDecl) refFns'
   , mFns = map updateFunction fns
+  , mTypes = (Set.unions $ map _dtypes modGlobals) `Set.union` (Set.unions $ map _ftypes fns)
+  , mConsts = Set.map (replaceLabels labelMap') $ (Set.unions $ map _dconsts modGlobals) `Set.union` (Set.unions $ map _fconsts fns) 
   }
   where fns' = map _f fns
         data' = map _d modGlobals
@@ -253,7 +257,7 @@ mod' name modGlobals fns = Module
 
         ------------------------------------------------------------------------
         -- label free label map; defFns, refFns, and globalValues.
-        labelMap'     = let m = map (\(l, s) -> (l, replaceLabels m s)) labelMap
+        labelMap'     = let m = Map.fromList (map (\(l, s) -> (l, replaceLabels m s)) labelMap)
                         in m
         defFns'       = map (replaceLabels labelMap') defFns
         refFns'       = map (replaceLabels labelMap') refFns
@@ -290,6 +294,7 @@ mod' name modGlobals fns = Module
               , Func.dConst =   sort
                                 . filter (\x -> not (x `elem` allFnConstants))
                                 . filter isFnConstant
+                                . map (replaceLabels labelMap')
                                 $ Set.toList cs
                 -- set the updated (with fixed lables) body.
               , Func.dBody  = body
@@ -339,37 +344,24 @@ isLabel x
 -- That yak will not be shaved now.
 --------------------------------------------------------------------------------
 -- Label replacement for symbols.
-type LabelMap = [(Val.Symbol, Val.Symbol)]
+type LabelMap = Map Val.Symbol Val.Symbol
 
 replaceLabel :: HasCallStack => LabelMap -> Val.Symbol -> Val.Symbol
-replaceLabel m l@(Val.Named _ (Val.Label _)) = case lookup l m of
+replaceLabel m l@(Val.Named _ (Val.Label _)) = case Map.lookup l m of
   Nothing -> error $ "FATAL: Label " ++ show (pretty l) ++ " not in labelMap!"
-  Just s  | (ty l) == (ty s) -> s
-          -- if both are pointers this is probably going to work, as labels
-          -- are cast to int right now anyway. TODO: This should be fixed.
-          | Ty.isPtr (ty l) && Ty.isPtr (ty s) -> s
-          -- if they are not pointers, this is very likely going to break.
-          | otherwise -> traceShow ("!! WARN: Ignoring type missmatch " ++ show (pretty s) ++ " to " ++ show (pretty (ty l))) $ s
+  Just s  -> s
 
--- Label replacement for instructions.
-replaceLabel' :: HasCallStack => LabelMap -> Val.Symbol -> Val.Symbol
- -- turn functions into labels to be replaced by their right value.
-replaceLabel' m l@(Val.Named _ (Val.Label _)) = case lookup l m of
-  Nothing -> error $ "FATAL: Label " ++ show (pretty l) ++ " not in labelMap!"
-  Just s | (ty l) == (ty s) -> s
-         -- if both are pointers this is probably going to work, as labels
-         -- are cast to int right now anyway. TODO: This should be fixed.
-         | Ty.isPtr (ty l) && Ty.isPtr (ty s) -> s
-         | otherwise -> traceShow ("!! WARN: Ignoring type missmatch " ++ show (pretty s) ++ " to " ++ show (pretty (ty l))) $ s
+--  Just s  | (ty l) == (ty s) -> s
+--          -- if both are pointers this is probably going to work, as labels
+--          -- are cast to int right now anyway. TODO: This should be fixed.
+--          | Ty.isPtr (ty l) && Ty.isPtr (ty s) -> s
+--          -- if they are not pointers, this is very likely going to break.
+--          | otherwise -> traceShow ("!! WARN: Ignoring type missmatch " ++ show (pretty s) ++ " to " ++ show (pretty (ty l))) $ s
 
 -- * Symbols
 replaceLabels :: HasCallStack => LabelMap -> Val.Symbol -> Val.Symbol
 replaceLabels m s | isLabel s = replaceLabel m s
                   | otherwise = fmap (replaceLabelsV m) s
-
-replaceLabels' :: HasCallStack => LabelMap -> Val.Symbol -> Val.Symbol
-replaceLabels' m s | isLabel s = replaceLabel' m s
-                   | otherwise = fmap (replaceLabelsV' m) s
 
 -- * Values
 replaceLabelsV :: HasCallStack => LabelMap -> Val.Value -> Val.Value
@@ -409,10 +401,11 @@ replaceLabelsC m = \case
 -- * Instructions
 replaceLabelI :: HasCallStack => LabelMap -> Val.Symbol -> Val.Symbol
 -- turn functions into labels to be replaced by their right value.
-replaceLabelI m l@(Val.Named _ (Val.Label _)) = case lookup l m of
+replaceLabelI m l@(Val.Named _ (Val.Label _)) = case Map.lookup l m of
   Nothing -> error $ "FATAL: Label " ++ show (pretty l) ++ " not in labelMap!"
-  Just s | (ty l) == (ty s) -> s
-         | otherwise -> traceShow ("! WARN: Ignoring type missmatch " ++ show (pretty s) ++ " to " ++ show (pretty (ty l))) $ s
+  Just s  -> s
+--   Just s | (ty l) == (ty s) -> s
+--         | otherwise -> traceShow ("! WARN: Ignoring type missmatch " ++ show (pretty s) ++ " to " ++ show (pretty (ty l))) $ s
 replaceLabelI _ x = x
 
 -- * Update Instructions, and replace labels with their values.
