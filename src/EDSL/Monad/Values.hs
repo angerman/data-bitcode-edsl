@@ -54,7 +54,7 @@ mkDef f@(Function{..}) = f { fExtra = fExtra { feProto = False } }
 
 -- | create a typed label to be resolved later.
 label :: (HasCallStack, Monad m) => String -> Ty -> EdslT m Symbol
-label name ty = tellLabel $ Named name (Label ty) 
+label name ty = tellLabel name ty 
 
 -- | Globals (tracked in the monad)
 global :: (HasCallStack, Monad m) => String -> Symbol -> EdslT m Symbol

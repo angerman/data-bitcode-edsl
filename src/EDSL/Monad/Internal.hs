@@ -1,7 +1,7 @@
 {-# OPTIONS_GHC -fprof-auto #-}
 {-# LANGUAGE LambdaCase, GeneralizedNewtypeDeriving #-}
 module EDSL.Monad.Internal
-  (BodyBuilderT, BodyBuilder, BodyBuilderResult(..)
+  (BodyBuilderT, BodyBuilder, BodyBuilderResult(..), Resolver
   , runBodyBuilderT
   , execBodyBuilderT
   , execBodyBuilder
@@ -9,7 +9,7 @@ module EDSL.Monad.Internal
   , evalBodyBuilder
   , tellInst
   , tellInst'
-  , tellNewBlock, askBlocks
+  , tellNewBlock, askBlocks, takeBlocks
   -- * Labels, Globals, Constant and Types
   , tellLabel, askLabels
   , tellGlobal, askGlobals
@@ -49,10 +49,12 @@ import Control.Monad.Trans.Class
 -- and we need to provide some form of unique symbol supply
 -- the simples being a counter.
 
-type Labels = Set Val.Symbol
+type Labels = Set (String, Ty.Ty)
 type Consts = Set Val.Symbol
 type Globals = Set Val.Symbol
 type Types = Set Ty.Ty
+
+type Resolver = String -> Val.Symbol
 
 data FnCtx = FnCtx
   { nInst :: Int
@@ -71,9 +73,11 @@ data FnCtx = FnCtx
   -- logging facilities
   , _log :: [String]
   , _insts :: [Inst.Inst]
-  } deriving Show
+  -- label resolver
+  , resolver :: Resolver
+  }
 
-mkCtx i = FnCtx i 0 0 mempty Set.empty Set.empty Set.empty Set.empty mempty mempty
+mkCtx i r = FnCtx i 0 0 mempty Set.empty Set.empty Set.empty Set.empty mempty mempty r
 -- instance Monoid FnCtx where
 --   mempty = FnCtx 0 0 mempty
 --   (FnCtx is bs bbs) `mappend` (FnCtx is' bs' bbs') = FnCtx (is + is') (bs + bs') (bbs `mappend` shift is bs bbs')
@@ -110,25 +114,25 @@ getsCtx :: Monad m => (FnCtx -> a) -> BodyBuilderT m a
 getsCtx = BodyBuilderT . gets
 
 -- mapping over blocks
-runBodyBuilderT :: Monad m => Int -> BodyBuilderT m a -> m (a, BodyBuilderResult)
-runBodyBuilderT instOffset = fmap mkResult . flip runStateT (mkCtx instOffset) . unBodyBuilderT
+runBodyBuilderT :: Monad m => Resolver -> Int -> BodyBuilderT m a -> m (a, BodyBuilderResult)
+runBodyBuilderT resolver instOffset = fmap mkResult . flip runStateT (mkCtx instOffset resolver) . unBodyBuilderT
   where
     mkResult :: (a, FnCtx) -> (a, BodyBuilderResult)
     mkResult (a, s) = (a, BBR (reverseBlocks s) (globals s) (consts s) (labels s) (types s))
     reverseBlocks :: FnCtx -> [Func.BasicBlock]
     reverseBlocks = map (Func.bbmap reverse) . reverse . blocks
 
-execBodyBuilderT :: Monad m => Int -> BodyBuilderT m a -> m BodyBuilderResult
-execBodyBuilderT instOffset = fmap snd . runBodyBuilderT instOffset
+execBodyBuilderT :: Monad m => Resolver -> Int -> BodyBuilderT m a -> m BodyBuilderResult
+execBodyBuilderT resolver instOffset = fmap snd . runBodyBuilderT resolver instOffset
 
-execBodyBuilder :: Int -> BodyBuilderT Identity a -> BodyBuilderResult
-execBodyBuilder instOffset = runIdentity . execBodyBuilderT instOffset
+execBodyBuilder :: Resolver -> Int -> BodyBuilderT Identity a -> BodyBuilderResult
+execBodyBuilder resolver instOffset = runIdentity . execBodyBuilderT resolver instOffset
 
-evalBodyBuilderT :: Monad m => Int -> BodyBuilderT m a -> m a
-evalBodyBuilderT instOffset = flip evalStateT (mkCtx instOffset) . unBodyBuilderT
+evalBodyBuilderT :: Monad m => Resolver -> Int -> BodyBuilderT m a -> m a
+evalBodyBuilderT resolver instOffset = flip evalStateT (mkCtx instOffset resolver) . unBodyBuilderT
 
-evalBodyBuilder :: Int -> BodyBuilderT Identity a -> a
-evalBodyBuilder instOffset = runIdentity . evalBodyBuilderT instOffset
+evalBodyBuilder :: Resolver -> Int -> BodyBuilderT Identity a -> a
+evalBodyBuilder resolver instOffset = runIdentity . evalBodyBuilderT resolver instOffset
 
 
 -- | Adds an instruction to a block.
@@ -157,10 +161,11 @@ askInsts n = do
     blockInsts (Func.NamedBlock _ is) = is
 
 
-tellLabel :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
-tellLabel l = do
-  modifyCtx (\ctx -> ctx { labels = Set.insert l (labels ctx) })
-  return l
+tellLabel :: Monad m => String -> Ty.Ty -> BodyBuilderT m Val.Symbol
+tellLabel name t = do
+  modifyCtx (\ctx -> ctx { labels = Set.insert (name, t) (labels ctx) })
+  res <- getsCtx resolver
+  return $ res name
 
 askLabels :: Monad m => BodyBuilderT m Labels
 askLabels = getsCtx labels
@@ -235,3 +240,13 @@ askBlocks = reverseBlocks <$> getsCtx blocks
   where
     reverseBlocks :: [Func.BasicBlock] -> [Func.BasicBlock]
     reverseBlocks = map (Func.bbmap reverse) . reverse
+
+takeBlocks :: Monad m => Int -> BodyBuilderT m [Func.BasicBlock]
+takeBlocks i = do
+  blocks <- askBlocks
+  modifyCtx (\ctx -> ctx { nInst = i
+                         , nRef =0
+                         , nBlocks = 0
+                         , blocks = mempty
+                         })
+  return blocks

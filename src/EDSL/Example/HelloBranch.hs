@@ -22,7 +22,7 @@ pp = pretty
 helloBranch, helloBranch2, helloPtrFn, helloWorld, gepFun, binOpFun, prefixDataFun :: Module
 
 helloBranch = mod "helloWorld"
-  [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, _argv ] -> mdo
+  [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, _argv ] -> mdo
       block "entry" $ do
         constOne <- int32 1
         cond <- argc `iugt` constOne 
@@ -53,13 +53,13 @@ genBlock idMap str = block' str $ do
 
 
 helloBranch2 = mod "helloWorld"
-  [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+  [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
       idMap <- (++) <$> (mapM (genBlock idMap) ["foo", "bar", "baz"]) <*> ((:[]) <$> (block' "end" (ret =<< int32 0)))
       pure ()
   ]
 
 helloPtrFn = mod "helloWorld"
-  [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+  [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
       let sig = [i8ptr] --> i32
       block "entry" $ do
         -- obtain a slot to store an int32
@@ -93,7 +93,7 @@ helloPtrFn = mod "helloWorld"
   ]
 
 helloWorld = mod "helloWorld"
-  [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
+  [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
         foo <- global "foo" =<< cStr "hello world\n" 
         strPtr <- gep foo =<< sequence [int32 0, int32 0]
@@ -103,7 +103,7 @@ helloWorld = mod "helloWorld"
   ]
 
 gepFun = mod "helloWorld"
-  [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
+  [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
         p <- gep argv =<< sequence [int32 0]
         foo <- global "foo" =<< cStr "hello world\n" 
@@ -112,7 +112,7 @@ gepFun = mod "helloWorld"
   ]
 
 binOpFun = mod "helloWorld"
-  [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
+  [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
         slot <- bind2 alloca i32 (int32 1)
         store slot =<< int32 4
@@ -120,8 +120,8 @@ binOpFun = mod "helloWorld"
   ]
 
 prefixDataFun = mod "prefixData"
-  [ withPrefixDataM_ prefix $
-    def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
+  [ withPrefixDataM prefix $
+    def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
         -- obtain a pointer to the function
         -- prefixTy <- ty <$> prefix

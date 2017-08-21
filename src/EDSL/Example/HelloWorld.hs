@@ -8,10 +8,10 @@ import EDSL.Monad.Instructions
 import EDSL.Monad.Instructions.Binary
 
 helloWorld = mod "helloWorld"
-  [ def_ "square" ([i32] --> i32) $ \[ arg0 ] -> do
+  [ def "square" ([i32] --> i32) $ \[ arg0 ] -> do
       block "entry" $ do
         ret =<< arg0 `mul` arg0
-  , def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
+  , def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
         foo <- global "foo" =<< (cStr "hello world, %d\n") 
         strPtr  <- gep foo =<< sequence [int32 0, int32 0]

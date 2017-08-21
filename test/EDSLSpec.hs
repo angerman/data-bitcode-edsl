@@ -65,7 +65,7 @@ spec_edsl = do
     it "should be able to return the CMP result" $ do
       let bcfile = "test/cmp-ret.bc"
           testModule = mod "cmp-ret"
-            [ def_ "main" ([i32, ptr =<< i8ptr] --> i1) $ \[ argc, argv ] -> mdo
+            [ def "main" ([i32, ptr =<< i8ptr] --> i1) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
                   ret =<< (pure argc) `iultM` (int32 2)
                 pure ()
@@ -83,7 +83,7 @@ spec_edsl = do
       let bcfile = "test/br.bc"
           testModule :: Module
           testModule = mod "branch"
-            [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+            [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
                   c1 <- int32 1
                   cond <- argc `iugt` c1
@@ -107,7 +107,7 @@ spec_edsl = do
       let bcfile = "test/switch.bc"
           testModule :: Module
           testModule = mod "switch"
-            [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+            [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
                   c1 <- int32 1
                   c2 <- int32 2
@@ -137,7 +137,7 @@ spec_edsl = do
       let bcfile = "test/llvm.memset.bc"
           testModule :: Module
           testModule = mod "branch"
-            [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+            [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
                   slots <- bind2 alloca i8 (int8 16) 
                   memset <- fun "llvm.memset.p0i8.i32" =<< [i8ptr, i8, i32, i32, i1] --> void 
@@ -154,7 +154,7 @@ spec_edsl = do
       let bcfile = "test/undef.bc"
           testModule :: Module
           testModule = mod "undef"
-            [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+            [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
                   mem <- undef =<< (arr 10 =<< i8)
                   memG <- global "mem" mem 
@@ -173,7 +173,7 @@ spec_edsl = do
       let bcfile = "test/gep_str.bc"
           testModule :: Module
           testModule = mod "undef"
-            [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+            [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
                   foo <- global "foo" =<< cStr "hello world\n" 
                   strPtr  <- gep foo =<< sequence [int32 0, int32 6]
@@ -192,7 +192,7 @@ spec_edsl = do
       let bcfile = "test/store_args.bc"
           testModule :: Module
           testModule = mod "undef"
-            [ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+            [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
                   argcSlot <- bind2 alloca i32 (int32 1) -- space for 1 i32
                   store argcSlot argc
@@ -212,7 +212,7 @@ spec_edsl = do
       let bcfile = "test/prefix_data.bc"
           testModule :: Module
           testModule = mod "undef"
-            [ withPrefixDataM_ prefix $ def_ "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+            [ withPrefixDataM prefix $ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
                   -- we will obtain the argc and argv slot to populate the local instruction and
                   -- refernece count here

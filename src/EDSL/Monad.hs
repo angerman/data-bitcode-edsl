@@ -5,7 +5,7 @@ module EDSL.Monad
   -- EdslT
   , Error, Inst
   , EdslT, Edsl
-  , runEdslT
+  , runEdslT, evalEdsl
   )
   where
 
