@@ -46,7 +46,7 @@ import Data.Word (Word64)
 truncC, zextC, sextC, fpToUiC, fpToSiC, uiToFpC, siToFpC, fpTruncC, fpExtC, ptrToIntC, intToPtrC, bitcastC, addrSpCastC
   :: (Monad m, HasCallStack) => Ty -> Symbol -> EdslT m Symbol
 mkConstCast :: (Monad m, HasCallStack) => CastOp -> Ty -> Symbol -> EdslT m Symbol
-mkConstCast op t = tellConst . Unnamed . Constant t . Const.Cast t op
+mkConstCast op t = tellConst . Unnamed t . Constant t . Const.Cast t op
 truncC      t = mkConstCast CastOp.TRUNC t
 zextC       t = mkConstCast CastOp.ZEXT t
 sextC       t = mkConstCast CastOp.SEXT t
@@ -67,7 +67,7 @@ addC, subC, mulC, udivC, sdivC, uremC, sremC, shlC, lshrC, ashrC, andC, orC, xor
   :: (Monad m, HasCallStack) => Symbol -> Symbol -> EdslT m Symbol
 mkConstBinOp :: (Monad m, HasCallStack) => BinOp.BinOp -> Symbol -> Symbol -> EdslT m Symbol
 -- TODO: verify that both are Constants!
-mkConstBinOp op lhs rhs | ty lhs == ty rhs = tellConst (Unnamed (Constant (ty lhs) $ Const.BinOp op lhs rhs))
+mkConstBinOp op lhs rhs | ty lhs == ty rhs = tellConst ((\v -> Unnamed (ty v) v) (Constant (ty lhs) $ Const.BinOp op lhs rhs))
                         | otherwise = throwE . show $ text "*** Type Error:" <+> (text ("BINOP (" ++ show op ++ "), types do not agree")
                                                                                  $+$ text "LHS:" <+> pretty lhs
                                                                                  $+$ text "RHS:" <+> pretty rhs)

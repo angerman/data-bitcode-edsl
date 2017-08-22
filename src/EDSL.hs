@@ -3,6 +3,7 @@
 {-# OPTIONS_GHC -fprof-auto #-} 
 {-# LANGUAGE TupleSections     #-}
 {-# LANGUAGE LambdaCase        #-}
+{-# LANGUAGE RecursiveDo       #-}
 
 module EDSL
   ( module EDSL.Monad.Types
@@ -25,6 +26,7 @@ import EDSL.Monad.Internal
 import EDSL.Monad.Types
 import EDSL.Monad.Values
 import EDSL.Monad.Instructions
+import EDSL.Monad.EdslT (evalEdslT)
 
 import Prelude hiding (mod, writeFile)
 
@@ -65,6 +67,7 @@ import Data.List (sort, nub)
 import Data.Maybe (fromMaybe)
 import Control.Applicative ((<|>))
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.Fix (MonadFix)
 
 import Control.Monad.Trans.Except (ExceptT(..), runExceptT, throwE)
 
@@ -116,7 +119,7 @@ defT :: (HasCallStack, Monad m)
 defT name sig body = do sig' <- sig
                         body (args sig')
                         mkFunc sig'
-  where args sig = map Val.Unnamed $ zipWith Val.Arg (Ty.teParamTy sig) [0..]
+  where args sig = map Val.mkUnnamed $ zipWith Val.Arg (Ty.teParamTy sig) [0..]
         mkFunc :: (HasCallStack, Monad m) => Ty.Ty -> EdslT m Func.Function
         mkFunc sig = Func.Function <$> deffun name sig <*> pure [] <*> lift (takeBlocks 0)
  
@@ -131,7 +134,7 @@ ghcdefT :: (HasCallStack, Monad m)
 ghcdefT name sig body = do sig' <- sig
                            body (args sig')
                            mkFunc sig'
-  where args sig = map Val.Unnamed $ zipWith Val.Arg (Ty.teParamTy sig) [0..]
+  where args sig = map Val.mkUnnamed $ zipWith Val.Arg (Ty.teParamTy sig) [0..]
         mkFunc :: (HasCallStack, Monad m) => Ty.Ty -> EdslT m Func.Function
         mkFunc sig = Func.Function <$> ghcfun name sig <*> pure [] <*> lift (takeBlocks 0) 
 
@@ -150,21 +153,23 @@ withPrefixDataM prefixGen f = withPrefixData <$> prefixGen <*> f
 
 -- | Module
 mod :: HasCallStack => String -> [Edsl Func.Function] -> Module
-mod name = mod' name []
+mod name = runIdentity . mod' name []
 
 -- | mod' module creation. This does the heavy lifting.
-mod' :: HasCallStack
+mod' :: (HasCallStack, Monad m, MonadFix m)
      => String               -- ^ Module name
-     -> [Edsl Val.Symbol]    -- ^ module globals
-     -> [Edsl Func.Function] -- ^ module functions
-     -> Module
-mod' name modGlobals fns = let (resolver, m) = case evalEdsl resolver 0 go of
-                                 Left e -> error e
-                                 Right res -> res
-                           in m 
-  where go :: Edsl (String -> Val.Symbol, Module)
+     -> [EdslT m Val.Symbol]    -- ^ module globals
+     -> [EdslT m Func.Function] -- ^ module functions
+     -> m Module
+mod' name modGlobals fns = mdo
+  (resolver, m) <- f <$> evalEdslT resolver 0 go
+  return m
+  
+  where f (Left e)  = ((\x -> Val.Value Ty.Void), error e)
+        f (Right r) = r
+--        go :: (HasCallStack, Monad m, MonadFix m) => EdslT m (String -> Val.Value, Module)
         go = do
-          let r = error "no resolver!"
+
           _ <- sequence modGlobals
           fns' <- sequence fns
           globals <- Set.toList <$> lift askGlobals
@@ -178,13 +183,13 @@ mod' name modGlobals fns = let (resolver, m) = case evalEdsl resolver 0 go of
               allValues = defFns ++ refFns ++ globalValues
               allFnConstants = filter isFnConstant allValues 
               namedValuesMap :: [(String, Val.Symbol)]
-              namedValuesMap = [(n, s) | s@(Val.Named n _) <- allValues]
-              labelMap :: [(String, Val.Symbol)]
+              namedValuesMap = [(n, s) | s@(Val.Named n _ _) <- allValues]
+              labelMap :: [(String, Val.Value)]
               extGlobals :: [Val.Symbol]
               (labelMap, extGlobals) = foldl f ([],[]) labels
                 where f (lm, gs) (n, t) = case lookup n namedValuesMap of
-                                            Just s  -> ((n,s):lm, gs)
-                                            Nothing -> let g = extGlobal_ n t in ((n,g):lm, g:gs)
+                                            Just s  -> ((n, Val.symbolValue s):lm, gs)
+                                            Nothing -> let g = extGlobal_ n t in ((n, Val.symbolValue g):lm, g:gs)
               globalValues' = extGlobals ++ globalValues
               defFnMap = zip defFns defFns
               refFnMap = zip refFns refFns
@@ -211,20 +216,28 @@ mod' name modGlobals fns = let (resolver, m) = case evalEdsl resolver 0 go of
                 where
                   body :: [Func.BasicBlock]
                   body = map (Func.bimap (Func.imap (updateInst fixFunction))) (Func.dBody f)
+              fixType :: Val.Symbol -> Val.Symbol
+              fixType (Val.Named n t v) = (Val.Named n (ty v) v)
+              fixType (Val.Unnamed t v) = (Val.Unnamed (ty v) v)
+              fixType x = x
                              
-                                     
+              
+          let labelMap' = Map.fromList labelMap
+              resolver name = fromMaybe (error $ "unable to resovle function " ++ show name) $ Map.lookup name labelMap'
+
           types <- lift askTypes
           consts <- lift askConsts
-          return (r, Module
+
+          return (resolver, Module
                    { mVersion    = 1
                    , mTriple     = Nothing
                    , mDatalayout = Nothing
-                   , mValues = globalValues'
+                   , mValues = map fixType globalValues'
                    -- TODO: This is looks aweful. However we ended up with non prototype fn's here. :(
                    , mDecls = map (fmap mkDecl) refFns
                    , mFns = map updateFunction fns'
                    , mTypes = types 
-                   , mConsts = consts 
+                   , mConsts = Set.map fixType consts 
                    })
 
 --------------------------------------------------------------------------------

@@ -43,6 +43,10 @@ import Control.Monad.Trans.State
 import Data.Functor.Identity
 import Control.Monad.Trans.Class
 
+import Debug.Trace
+
+import GHC.Stack (HasCallStack)
+
 --------------------------------------------------------------------------------
 -- Function Body Monad... or building blocks is monadic.
 -- We want to be able to obtain references for later use
@@ -54,7 +58,7 @@ type Consts = Set Val.Symbol
 type Globals = Set Val.Symbol
 type Types = Set Ty.Ty
 
-type Resolver = String -> Val.Symbol
+type Resolver = String -> Val.Value
 
 data FnCtx = FnCtx
   { nInst :: Int
@@ -108,13 +112,13 @@ data BodyBuilderResult = BBR
 
 type BodyBuilder a = BodyBuilderT Identity a
 
-modifyCtx :: Monad m => (FnCtx -> FnCtx) -> BodyBuilderT m ()
+modifyCtx :: (HasCallStack, Monad m) => (FnCtx -> FnCtx) -> BodyBuilderT m ()
 modifyCtx = BodyBuilderT . modify
-getsCtx :: Monad m => (FnCtx -> a) -> BodyBuilderT m a
+getsCtx :: (HasCallStack, Monad m) => (FnCtx -> a) -> BodyBuilderT m a
 getsCtx = BodyBuilderT . gets
 
 -- mapping over blocks
-runBodyBuilderT :: Monad m => Resolver -> Int -> BodyBuilderT m a -> m (a, BodyBuilderResult)
+runBodyBuilderT :: (HasCallStack, Monad m) => Resolver -> Int -> BodyBuilderT m a -> m (a, BodyBuilderResult)
 runBodyBuilderT resolver instOffset = fmap mkResult . flip runStateT (mkCtx instOffset resolver) . unBodyBuilderT
   where
     mkResult :: (a, FnCtx) -> (a, BodyBuilderResult)
@@ -122,16 +126,16 @@ runBodyBuilderT resolver instOffset = fmap mkResult . flip runStateT (mkCtx inst
     reverseBlocks :: FnCtx -> [Func.BasicBlock]
     reverseBlocks = map (Func.bbmap reverse) . reverse . blocks
 
-execBodyBuilderT :: Monad m => Resolver -> Int -> BodyBuilderT m a -> m BodyBuilderResult
+execBodyBuilderT :: (HasCallStack, Monad m) => Resolver -> Int -> BodyBuilderT m a -> m BodyBuilderResult
 execBodyBuilderT resolver instOffset = fmap snd . runBodyBuilderT resolver instOffset
 
-execBodyBuilder :: Resolver -> Int -> BodyBuilderT Identity a -> BodyBuilderResult
+execBodyBuilder :: HasCallStack => Resolver -> Int -> BodyBuilderT Identity a -> BodyBuilderResult
 execBodyBuilder resolver instOffset = runIdentity . execBodyBuilderT resolver instOffset
 
-evalBodyBuilderT :: Monad m => Resolver -> Int -> BodyBuilderT m a -> m a
+evalBodyBuilderT :: (HasCallStack, Monad m) => Resolver -> Int -> BodyBuilderT m a -> m a
 evalBodyBuilderT resolver instOffset = flip evalStateT (mkCtx instOffset resolver) . unBodyBuilderT
 
-evalBodyBuilder :: Resolver -> Int -> BodyBuilderT Identity a -> a
+evalBodyBuilder :: HasCallStack => Resolver -> Int -> BodyBuilderT Identity a -> a
 evalBodyBuilder resolver instOffset = runIdentity . evalBodyBuilderT resolver instOffset
 
 
@@ -161,11 +165,11 @@ askInsts n = do
     blockInsts (Func.NamedBlock _ is) = is
 
 
-tellLabel :: Monad m => String -> Ty.Ty -> BodyBuilderT m Val.Symbol
+tellLabel :: (HasCallStack, Monad m) => String -> Ty.Ty -> BodyBuilderT m Val.Symbol
 tellLabel name t = do
   modifyCtx (\ctx -> ctx { labels = Set.insert (name, t) (labels ctx) })
   res <- getsCtx resolver
-  return $ res name
+  return $ Val.Named name t (res name)
 
 askLabels :: Monad m => BodyBuilderT m Labels
 askLabels = getsCtx labels
@@ -206,7 +210,7 @@ tellInst inst = do
   modifyCtx (\c -> c { _insts = inst:(_insts c) })
   
   nr <- getsCtx nRef
-  case Val.Unnamed . flip Val.TRef nr <$> instTy inst of
+  case (\v -> Val.Unnamed (ty v) v) . flip Val.TRef nr <$> instTy inst of
     ref@(Just s) -> do tellType (ty s) -- record the instruction type
                        modifyCtx (\ctx -> ctx { nInst  = 1 + nInst ctx
                                               , nRef   = 1 + nRef ctx

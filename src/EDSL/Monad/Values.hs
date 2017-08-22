@@ -58,27 +58,27 @@ label name ty = tellLabel name ty
 
 -- | Globals (tracked in the monad)
 global :: (HasCallStack, Monad m) => String -> Symbol -> EdslT m Symbol
-global name val = tellGlobal . Named name =<< withInit val . defGlobal <$> ptr (ty val)
+global name val = tellGlobal . mkNamed name =<< withInit val . defGlobal <$> ptr (ty val)
 
 extGlobal :: (HasCallStack, Monad m) => String -> Ty -> EdslT m Symbol
-extGlobal name ty = tellGlobal . Named name =<< defGlobal <$> (ptr ty)
+extGlobal name ty = tellGlobal . mkNamed name =<< defGlobal <$> (ptr ty)
 
 -- | INTERNAL: this will *not* record the type, nor the created global.
 extGlobal_ :: HasCallStack => String -> Ty -> Symbol
-extGlobal_ name ty | isPtr ty = Named name (defGlobal ty)
+extGlobal_ name ty | isPtr ty = mkNamed name (defGlobal ty)
                    | otherwise = error $ "ty " ++ show ty ++ " must be ptr for global " ++ show name 
 
 fun :: (HasCallStack, Monad m) => String -> Ty -> EdslT m Symbol
-fun name sig = tellGlobal . Named name =<< mkDecl . defFunction <$> ptr sig
+fun name sig = tellGlobal . mkNamed name =<< mkDecl . defFunction <$> ptr sig
 
 deffun :: (HasCallStack, Monad m) => String -> Ty -> EdslT m Symbol
-deffun name sig = tellGlobal . Named name =<< mkDef . defFunction <$> ptr sig
+deffun name sig = tellGlobal . mkNamed name =<< mkDef . defFunction <$> ptr sig
 
 ghcfun :: (HasCallStack, Monad m) => String -> Ty -> EdslT m Symbol
-ghcfun name sig = tellGlobal . Named name =<< mkDef . withCC CallingConv.GHC . defFunction <$> ptr sig
+ghcfun name sig = tellGlobal . mkNamed name =<< mkDef . withCC CallingConv.GHC . defFunction <$> ptr sig
 
 uconst :: Ty -> Const -> Symbol
-uconst t = Unnamed . Constant t
+uconst t = mkUnnamed . Constant t
 
 -- | Constants (tracked in the monad)
 -- | @cStr@ creates a null terminated c string.
@@ -131,5 +131,5 @@ float80 = float 80
 float128 = float128
 
 undef :: (HasCallStack, Monad m) => Ty -> EdslT m Symbol
-undef = tellConst . Unnamed . flip Constant Undef
+undef = tellConst . mkUnnamed . flip Constant Undef
 

@@ -233,5 +233,43 @@ spec_edsl = do
       writeModule bcfile testModule
       decompile bcfile `shouldReturn` (bcfile -<.> "dis")
       compile bcfile `shouldReturn` (bcfile -<.> "exe")
-      run (bcfile -<.> "exe") [] `shouldReturn` (10, "", "")       
-            
+      run (bcfile -<.> "exe") [] `shouldReturn` (10, "", "")
+
+    it "should be able to handle internal labels" $ do
+      let bcfile = "test/label.bc"
+          testModule :: Module
+          testModule = mod "undef"
+            [ def "square" ([i32] --> i32) $ \[ arg0 ] -> do
+                block "entry" $ do
+                  ret =<< arg0 `mul` arg0
+            , def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc , argv ] -> do
+                block "entry" $ do
+                  square <- label "square" =<< ptr =<< [i32] --> i32
+                  Just r <- ccall square [argc]
+                  ret r
+            ]
+      -- putStrLn . show . pretty $ testModule 
+      writeModule bcfile testModule
+      decompile bcfile `shouldReturn` (bcfile -<.> "dis")
+      compile bcfile `shouldReturn` (bcfile -<.> "exe")
+      run (bcfile -<.> "exe") [] `shouldReturn` (1, "", "")
+      run (bcfile -<.> "exe") ["x"] `shouldReturn` (4, "", "")
+
+{- -- This won't work with functions. Only with external symbols.
+    it "should be able to handle external labels" $ do
+      let bcfile = "test/ext_label.bc"
+          testModule :: Module
+          testModule = mod "undef"
+            [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc , argv ] -> do
+                block "entry" $ do
+                  square <- label "puts" =<< ptr =<< [i8ptr] --> i32
+                  argv' <- gep argv =<< sequence [int32 0, int32 0]
+                  ccall square [argv']
+                  ret =<< (int32 0)
+            ]
+      putStrLn . show . pretty $ testModule 
+      writeModule bcfile testModule
+      decompile bcfile `shouldReturn` (bcfile -<.> "dis")
+      compile bcfile `shouldReturn` (bcfile -<.> "exe")
+      run (bcfile -<.> "exe") [] `shouldReturn` (1, "", "")
+-}

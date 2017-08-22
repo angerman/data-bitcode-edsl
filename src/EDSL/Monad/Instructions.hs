@@ -40,6 +40,7 @@ import Text.PrettyPrint as P
 
 import GHC.Stack (HasCallStack)
 import Data.Word (Word64)
+import Debug.Trace
 
 -- tellInst'' x = exceptT x >>= lift . tellInst'
 
@@ -61,7 +62,7 @@ store target source
 call' :: (HasCallStack, Monad m) => TailCallKind -> CallingConv -> Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
 call' tck cc f args
   | not . isFunctionPtr . ty $ f
-  = sthrowE $ text "Cannot call: " <+> pretty f <+> text "must be a function pointer."
+  = sthrowE $ text "Cannot call: " <+> pretty (ty f) <+> text "must be a function pointer."
   -- TODO: length should be equal, if not vararg.
   | length args < length (funParamTys (ty f))
   = sthrowE $ text "Cannot call: " <+> (pretty f <+> text "with insufficent arguments."
@@ -71,13 +72,11 @@ call' tck cc f args
   = sthrowE $ text "Cannot call: " <+> (pretty f <+> text "text with arguments, not matching the signature."
                                              $+$ text "Sig :" <+> pretty (funParamTys (ty f))
                                              $+$ text "Args:" <+> pretty (map ty args))
-  | (Function{}) <- symbolValue f = case isPtr (ty f) of
+  -- otherwise asssume function. We must not look into the function value, otherwise the lazyness
+  -- required for the lazy "label" resolution is impossible.
+  | otherwise = case isPtr (ty f) of
       True  -> tellInst $ Inst.Call (funRetTy (ty f)) tck cc f (ty f) args
       False -> sthrowE $ text "Callee must be of ptr type. Callee: " <+> pretty f 
-  | (TRef{})     <- symbolValue f = case isPtr (ty f) of
-      True  -> tellInst $ Inst.Call (funRetTy (ty f)) tck cc f (ty f) args
-      False -> sthrowE $ text "Callee must be of ptr type. Callee: " <+> pretty f
-  | otherwise                     = sthrowE $ text "Cannot call: " <+> pretty f
 
 call :: (HasCallStack, Monad m) => CallingConv -> Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
 call cc f args = call' Inst.None cc f args
