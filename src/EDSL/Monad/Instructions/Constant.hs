@@ -8,7 +8,7 @@ import EDSL.Monad.EdslT
 
 import Data.BitCode.LLVM.Classes.HasType
 
-import Data.BitCode.LLVM.Value (Value (Function, TRef, Constant), Named(Unnamed), Symbol, symbolValue)
+import Data.BitCode.LLVM.Value (Value (Function, TRef, Constant), Named(Unnamed), Symbol, symbolValue, mkUnnamed)
 import Data.BitCode.LLVM.Types (BasicBlockId)
 import Data.BitCode.LLVM.Type  (Ty)
 import Data.BitCode.LLVM.Function (BlockInst)
@@ -38,6 +38,7 @@ import Control.Monad.Trans.Except (ExceptT(..), throwE, runExceptT)
 import Control.Monad ((<=<), (>=>))
 import Data.Functor.Identity (Identity)
 
+import Data.BitCode.LLVM.Value (trace)
 
 import GHC.Stack
 import Data.Word (Word64)
@@ -46,7 +47,7 @@ import Data.Word (Word64)
 truncC, zextC, sextC, fpToUiC, fpToSiC, uiToFpC, siToFpC, fpTruncC, fpExtC, ptrToIntC, intToPtrC, bitcastC, addrSpCastC
   :: (Monad m, HasCallStack) => Ty -> Symbol -> EdslT m Symbol
 mkConstCast :: (Monad m, HasCallStack) => CastOp -> Ty -> Symbol -> EdslT m Symbol
-mkConstCast op t = tellConst . Unnamed t . Constant t . Const.Cast t op
+mkConstCast op t = tellConst . mkUnnamed t . Constant t . Const.Cast t op . trace ("[mkConstCast] accessing symbol for " ++ show op)
 truncC      t = mkConstCast CastOp.TRUNC t
 zextC       t = mkConstCast CastOp.ZEXT t
 sextC       t = mkConstCast CastOp.SEXT t
@@ -56,8 +57,7 @@ uiToFpC     t = mkConstCast CastOp.UITOFP t
 siToFpC     t = mkConstCast CastOp.SITOFP t
 fpTruncC    t = mkConstCast CastOp.FPTRUNC t
 fpExtC      t = mkConstCast CastOp.FPEXT t
-ptrToIntC   t s | isPtr (ty s) = mkConstCast CastOp.PTRTOINT t s
-                | otherwise    = throwE . show $ text "Cannot ptr-to-int cast: " <+> pretty s <+> text "to" <+> pretty t <+> text ", symbol not a pointer!"
+ptrToIntC   t = mkConstCast CastOp.PTRTOINT t
 intToPtrC   t = mkConstCast CastOp.INTTOPTR t
 bitcastC    t = mkConstCast CastOp.BITCAST t
 addrSpCastC t = mkConstCast CastOp.ADDRSPACECAST t
@@ -67,10 +67,9 @@ addC, subC, mulC, udivC, sdivC, uremC, sremC, shlC, lshrC, ashrC, andC, orC, xor
   :: (Monad m, HasCallStack) => Symbol -> Symbol -> EdslT m Symbol
 mkConstBinOp :: (Monad m, HasCallStack) => BinOp.BinOp -> Symbol -> Symbol -> EdslT m Symbol
 -- TODO: verify that both are Constants!
-mkConstBinOp op lhs rhs | ty lhs == ty rhs = tellConst ((\v -> Unnamed (ty v) v) (Constant (ty lhs) $ Const.BinOp op lhs rhs))
-                        | otherwise = throwE . show $ text "*** Type Error:" <+> (text ("BINOP (" ++ show op ++ "), types do not agree")
-                                                                                 $+$ text "LHS:" <+> pretty lhs
-                                                                                 $+$ text "RHS:" <+> pretty rhs)
+mkConstBinOp op lhs rhs = tellConst . mkUnnamed (ty lhs) . Constant (ty lhs) $ Const.BinOp op (trace ("accessing lhs for binop " ++ show op) lhs)
+                                                                                              (trace ("accessing rhs for binop " ++ show op) rhs)
+
 addC  lhs rhs = mkConstBinOp BinOp.ADD  lhs rhs
 subC  lhs rhs = mkConstBinOp BinOp.SUB  lhs rhs
 mulC  lhs rhs = mkConstBinOp BinOp.MUL  lhs rhs

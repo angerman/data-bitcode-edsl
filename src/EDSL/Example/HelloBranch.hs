@@ -120,8 +120,7 @@ binOpFun = mod "helloWorld"
   ]
 
 prefixDataFun = mod "prefixData"
-  [ withPrefixDataM prefix $
-    def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
+  [ defM (withPrefixData <$> prefix) "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
         -- obtain a pointer to the function
         -- prefixTy <- ty <$> prefix

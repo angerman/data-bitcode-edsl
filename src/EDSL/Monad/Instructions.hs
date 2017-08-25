@@ -40,7 +40,7 @@ import Text.PrettyPrint as P
 
 import GHC.Stack (HasCallStack)
 import Data.Word (Word64)
-import Debug.Trace
+-- import Debug.Trace
 
 -- tellInst'' x = exceptT x >>= lift . tellInst'
 
@@ -48,16 +48,16 @@ alloca :: (HasCallStack, Monad m) => Ty -> Symbol -> EdslT m Symbol
 alloca ty size = tellInst' =<< Inst.Alloca <$> ptr ty <*> pure size <*> pure 0
 
 load :: (HasCallStack, Monad m) => Symbol -> EdslT m Symbol
-load s | isPtr (ty s) = tellInst' =<< Inst.Load <$> (deptr (ty s)) <*> pure s <*> pure 0
-       | otherwise    = sthrowE $ text "Cannlot load:" <+> pretty s <+> text "must be of pointer type!"
+load s {- | isPtr (ty s)-} = tellInst' =<< Inst.Load <$> (deptr (ty s)) <*> pure s <*> pure 0
+--       | otherwise    = sthrowE $ text "Cannlot load:" <+> pretty s <+> text "must be of pointer type!"
 store :: (HasCallStack, Monad m)
       => Symbol -- ^ Source
       -> Symbol -- ^ Target
       -> EdslT m ()
-store target source
-  | not (isPtr (ty target))        = sthrowE $ text "can not store" <+> pretty source <+> text "in" <+> pretty target <+> text "Target" <+> pretty target <+> text "must be of ptr type."
-  | lower (ty target) == ty source = tellInst (Inst.Store target source 0) >> pure ()
-  | otherwise                      = sthrowE $ text "can not store " <+> pretty source <+> text "in" <+> pretty target  
+store target source = tellInst (Inst.Store target source 0) >> pure ()
+--  | not (isPtr (ty target))        = sthrowE $ text "can not store" <+> pretty source <+> text "in" <+> pretty target <+> text "Target" <+> pretty target <+> text "must be of ptr type."
+--  | lower (ty target) == ty source = tellInst (Inst.Store target source 0) >> pure ()
+--  | otherwise                      = sthrowE $ text "can not store " <+> pretty source <+> text "in" <+> pretty target  
 
 call' :: (HasCallStack, Monad m) => TailCallKind -> CallingConv -> Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
 call' tck cc f args
@@ -75,23 +75,23 @@ call' tck cc f args
   -- otherwise asssume function. We must not look into the function value, otherwise the lazyness
   -- required for the lazy "label" resolution is impossible.
   | otherwise = case isPtr (ty f) of
-      True  -> tellInst $ Inst.Call (funRetTy (ty f)) tck cc f (ty f) args
+      True  -> tellInst $ Inst.Call (funRetTy (ty f)) tck cc (trace "accessing fn" f) (ty f) (trace "accessing fn args" args)
       False -> sthrowE $ text "Callee must be of ptr type. Callee: " <+> pretty f 
 
 call :: (HasCallStack, Monad m) => CallingConv -> Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
-call cc f args = call' Inst.None cc f args
+call cc f args = trace "[call]" <$> call' Inst.None cc f args
 tailcall :: (HasCallStack, Monad m) => CallingConv -> Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
-tailcall cc f args = call' Inst.Tail cc f args
+tailcall cc f args = trace "[tailcall]" <$> call' Inst.Tail cc f args
 
 ccall :: (HasCallStack, Monad m) => Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
-ccall f args = call' Inst.None CConv.C f args
+ccall f args = trace "[ccall]" <$> call' Inst.None CConv.C f args
 ghccall :: (HasCallStack, Monad m) => Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
-ghccall f args = call' Inst.None CConv.GHC f args
+ghccall f args = trace "[ghccall]" <$> call' Inst.None CConv.GHC f args
 
 tailccall :: Monad m => Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
-tailccall f args = call' Inst.Tail CConv.C f args
+tailccall f args = trace "[tailccall]" <$> call' Inst.Tail CConv.C f args
 tailghccall :: Monad m => Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
-tailghccall f args = call' Inst.Tail CConv.GHC f args
+tailghccall f args = trace "[tailghccall]" <$> call' Inst.Tail CConv.GHC f args
 
 ret :: Monad m => Symbol -> EdslT m (Maybe Symbol)
 ret = tellInst . Inst.Ret . Just 
@@ -100,15 +100,15 @@ retVoid = tellInst (Inst.Ret Nothing) >> pure ()
 
 ubr :: Monad m => BasicBlockId -> EdslT m (Maybe Symbol)
 ubr = tellInst . Inst.UBr
-br :: Monad m => Symbol -> BasicBlockId -> BasicBlockId -> EdslT m (Maybe Symbol)
-br cond l r | isBoolTy cond = tellInst (Inst.Br cond l r)
-            | otherwise     = sthrowE $ text "Cannot branch with " <+> pretty cond <+> text " condition. Must be i1 (Bool)"
+br :: Monad m => Symbol -> BasicBlockId -> BasicBlockId -> EdslT m () -- (Maybe Symbol)
+br cond l r {- | isBoolTy cond -} = trace "[br]" <$> tellInst (Inst.Br cond l r) >> pure ()
+            -- | otherwise     = sthrowE $ text "Cannot branch with " <+> pretty cond <+> text " condition. Must be i1 (Bool)"
             
-switch :: Monad m => Symbol -> BasicBlockId -> [(Symbol, BasicBlockId)] -> EdslT m (Maybe Symbol)
-switch cond def cases = tellInst (Inst.Switch cond def cases)
+switch :: Monad m => Symbol -> BasicBlockId -> [(Symbol, BasicBlockId)] -> EdslT m ()
+switch cond def cases = trace "[switch]" <$> tellInst (Inst.Switch cond def cases) >> pure ()
 
 gep :: Monad m => Symbol -> [Symbol] -> EdslT m Symbol
-gep s = tellInst' . Inst.Gep (ty s) True s
+gep s ss = trace "[gep]" <$> tellInst' $ trace "[gepI]" $ Inst.Gep (ty s) True (trace "[gep] base" s) (trace "[gep] idxs" ss)
 
 extractValue :: (HasCallStack, Monad m) => Symbol -> [Word64] -> EdslT m Symbol
 extractValue s = tellInst' . Inst.ExtractValue s

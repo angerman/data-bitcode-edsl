@@ -11,13 +11,12 @@ module EDSL
   , module EDSL.Monad.Instructions
   , Result(..)
   , block, block', block''
-  , def, defT
+  , def, defT, defM
   , ghcdef, ghcdefT
   , mod, mod'
   , writeModule
   , dumpModuleBitcodeAST
   , withPrefixData
-  , withPrefixDataM
   )
 where
 
@@ -26,7 +25,7 @@ import EDSL.Monad.Internal
 import EDSL.Monad.Types
 import EDSL.Monad.Values
 import EDSL.Monad.Instructions
-import EDSL.Monad.EdslT (evalEdslT)
+import EDSL.Monad.EdslT (evalEdslT, withResolver)
 
 import Prelude hiding (mod, writeFile)
 
@@ -57,23 +56,24 @@ import qualified Data.BitCode.LLVM.Opcodes.Binary  as BinOp
 
 import Data.Functor.Identity (runIdentity)
 
-import Debug.Trace
-
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.List (sort, nub)
+import Data.List (sort, nub, sortBy)
 import Data.Maybe (fromMaybe)
 import Control.Applicative ((<|>))
+import Control.Monad (liftM2)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Fix (MonadFix)
-
 import Control.Monad.Trans.Except (ExceptT(..), runExceptT, throwE)
 
 import Data.Binary (encodeFile)
 
 import GHC.Stack (HasCallStack)
+
+import Debug.Trace
+import Data.Function (on)
 
 data Result
   = FunctionResult
@@ -112,89 +112,91 @@ block l = fmap snd . block' l
 
 -- | Function definition
 defT :: (HasCallStack, Monad m)
-     => String                             -- ^ The name of the function
+     => EdslT m (Val.Value -> Val.Value)   -- ^ Modifier
+     -> String                             -- ^ The name of the function
      -> EdslT m Ty.Ty                      -- ^ The function signature ([x] --> y)
      -> ([Val.Symbol] -> EdslT m a)        -- ^ The body generator (symbols are references to the functions arguments)
      -> EdslT m Func.Function
-defT name sig body = do sig' <- sig
-                        body (args sig')
-                        mkFunc sig'
-  where args sig = map Val.mkUnnamed $ zipWith Val.Arg (Ty.teParamTy sig) [0..]
-        mkFunc :: (HasCallStack, Monad m) => Ty.Ty -> EdslT m Func.Function
-        mkFunc sig = Func.Function <$> deffun name sig <*> pure [] <*> lift (takeBlocks 0)
- 
+defT mod name sig body = do sig' <- sig
+                            body (args sig')
+                            mkFunc sig' =<< mod
+  where args sig = zipWith (\t -> Val.mkUnnamed t . Val.Arg t) (Ty.teParamTy sig) [0..]
+        mkFunc :: (HasCallStack, Monad m) => Ty.Ty -> (Val.Value -> Val.Value) -> EdslT m Func.Function
+        mkFunc sig mod = Func.Function <$> deffun mod name sig <*> pure [] <*> lift (takeBlocks 0)
+
+
+defM :: HasCallStack
+  => Edsl (Val.Value -> Val.Value)
+  -> String
+  -> Edsl Ty.Ty
+  -> ([Val.Symbol] -> Edsl a)
+  -> Edsl Func.Function
+defM mod name sig = defT mod name sig
+
 def :: HasCallStack => String -> Edsl Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Edsl Func.Function
-def name sig = defT name sig
+def name sig = defT (pure id) name sig
 
 ghcdefT :: (HasCallStack, Monad m)
-        => String
+        => EdslT m (Val.Value -> Val.Value) -- ^ function modifier
+        -> String
         -> EdslT m Ty.Ty
         -> ([Val.Symbol] -> EdslT m a)
         -> EdslT m Func.Function
-ghcdefT name sig body = do sig' <- sig
-                           body (args sig')
-                           mkFunc sig'
-  where args sig = map Val.mkUnnamed $ zipWith Val.Arg (Ty.teParamTy sig) [0..]
-        mkFunc :: (HasCallStack, Monad m) => Ty.Ty -> EdslT m Func.Function
-        mkFunc sig = Func.Function <$> ghcfun name sig <*> pure [] <*> lift (takeBlocks 0) 
+ghcdefT mod name sig body = defT (liftM2 (.) mod (pure $ withCC CallingConv.GHC)) name sig body
+
+-- ghcdefM :: (HasCalLStack
 
 ghcdef :: HasCallStack => String -> Edsl Ty.Ty -> ([Val.Symbol] -> Edsl a) -> Edsl Func.Function
-ghcdef name sig = ghcdefT name sig
+ghcdef name sig = ghcdefT (pure id) name sig
 
 -- | Prefix Data
-withPrefixData :: HasCallStack => Val.Symbol -> Func.Function -> Func.Function
-withPrefixData dat f = f { Func.dSig = sig' }
-  where sig = Func.dSig f
-        sig' = (\x -> x { Val.fExtra = (Val.fExtra x) { Val.fePrefixData = pure dat }}) <$> sig
+withPrefixData :: HasCallStack => Val.Symbol -> Val.Value -> Val.Value
+withPrefixData dat f = f { Val.fExtra = (Val.fExtra f) { Val.fePrefixData = pure dat } }
 
 -- | withPrefixData, if the prefixdata needs to run in the Builder.
-withPrefixDataM :: (HasCallStack, Monad m) => EdslT m Val.Symbol -> EdslT m Func.Function -> EdslT m Func.Function
-withPrefixDataM prefixGen f = withPrefixData <$> prefixGen <*> f
+-- withPrefixDataM :: (HasCallStack, Monad m) => EdslT m Val.Symbol -> EdslT m Func.Function -> EdslT m Func.Function
+-- withPrefixDataM prefixGen f = withPrefixData <$> prefixGen <*> f
 
 -- | Module
 mod :: HasCallStack => String -> [Edsl Func.Function] -> Module
-mod name = runIdentity . mod' name []
+mod name fns = case runIdentity (mod' name [] fns) of
+  Left e -> error e
+  Right m -> m
 
 -- | mod' module creation. This does the heavy lifting.
 mod' :: (HasCallStack, Monad m, MonadFix m)
      => String               -- ^ Module name
      -> [EdslT m Val.Symbol]    -- ^ module globals
      -> [EdslT m Func.Function] -- ^ module functions
-     -> m Module
-mod' name modGlobals fns = mdo
-  (resolver, m) <- f <$> evalEdslT resolver 0 go
-  return m
-  
-  where f (Left e)  = ((\x -> Val.Value Ty.Void), error e)
-        f (Right r) = r
---        go :: (HasCallStack, Monad m, MonadFix m) => EdslT m (String -> Val.Value, Module)
-        go = do
+     -> m (Either Error Module)
+mod' name modGlobals fns = evalEdslT 0 go 
+  where go = mdo
+          lift (setGOffset id)
+          lift (setDOffset (\x -> fromIntegral nG + x))
+          lift (setFOffset (\x -> fromIntegral (nG + nD) + x))
+          lift (setCOffset (\x -> fromIntegral (nG + nD + nF) + x))
+          
+          fns' <- withResolver $ do
+            fs <- sequence fns
+            _ <- sequence modGlobals
+            return fs
 
-          _ <- sequence modGlobals
-          fns' <- sequence fns
-          globals <- Set.toList <$> lift askGlobals
-          labels <- lift askLabels
+          nG <- Set.size <$> lift askGlobals
+          nF <- Set.size <$> lift askFuncs
+          nD <- Set.size <$> lift askDecls
+          
+          globalValues <-lift askGlobals
+--          labels <- lift askLabels
 
-          let defFns :: [Val.Symbol]
-              defFns = map Func.dSig fns'
-              refFns :: [Val.Symbol]
-              refFns = [f | f <- globals, isFunction f, not (f `elem` defFns)]
-              globalValues = sort $ filter (not . isFunction) globals
-              allValues = defFns ++ refFns ++ globalValues
-              allFnConstants = filter isFnConstant allValues 
-              namedValuesMap :: [(String, Val.Symbol)]
-              namedValuesMap = [(n, s) | s@(Val.Named n _ _) <- allValues]
-              labelMap :: [(String, Val.Value)]
-              extGlobals :: [Val.Symbol]
-              (labelMap, extGlobals) = foldl f ([],[]) labels
-                where f (lm, gs) (n, t) = case lookup n namedValuesMap of
-                                            Just s  -> ((n, Val.symbolValue s):lm, gs)
-                                            Nothing -> let g = extGlobal_ n t in ((n, Val.symbolValue g):lm, g:gs)
-              globalValues' = extGlobals ++ globalValues
-              defFnMap = zip defFns defFns
-              refFnMap = zip refFns refFns
+          defFns <- lift askFuncs
+          refFns <- lift askDecls
+          let -- allValues = defFns ++ refFns ++ globalValues
+              -- allFnConstants = filter isFnConstant allValues 
+
+--              defFnMap = zip defFns defFns
+              -- refFnMap = zip refFns refFns
               fixFunction :: Val.Symbol -> Val.Symbol
-              fixFunction s | (Val.Function{}) <- Val.symbolValue s = fromMaybe (error "Unable to locate function.") ((lookup s defFnMap) <|> (lookup s refFnMap))
+--              fixFunction s | (Val.Function{}) <- Val.symbolValue s = fromMaybe (error "Unable to locate function.") ((lookup s defFnMap) <|> (lookup s refFnMap))
               fixFunction x = x
 
 
@@ -217,28 +219,26 @@ mod' name modGlobals fns = mdo
                   body :: [Func.BasicBlock]
                   body = map (Func.bimap (Func.imap (updateInst fixFunction))) (Func.dBody f)
               fixType :: Val.Symbol -> Val.Symbol
-              fixType (Val.Named n t v) = (Val.Named n (ty v) v)
-              fixType (Val.Unnamed t v) = (Val.Unnamed (ty v) v)
-              fixType x = x
-                             
+              fixType (Val.Named n i t v) = (Val.Named n i (ty v) v)
+              fixType (Val.Unnamed i t v) = (Val.Unnamed i (ty v) v) 
               
-          let labelMap' = Map.fromList labelMap
-              resolver name = fromMaybe (error $ "unable to resovle function " ++ show name) $ Map.lookup name labelMap'
-
+          -- let labelMap' = Map.fromList labelMap
+              -- resolver name = fromMaybe (error $ "unable to resovle function " ++ show name) $ Map.lookup name labelMap'
           types <- lift askTypes
           consts <- lift askConsts
 
-          return (resolver, Module
+
+          return Module
                    { mVersion    = 1
                    , mTriple     = Nothing
                    , mDatalayout = Nothing
-                   , mValues = map fixType globalValues'
-                   -- TODO: This is looks aweful. However we ended up with non prototype fn's here. :(
-                   , mDecls = map (fmap mkDecl) refFns
-                   , mFns = map updateFunction fns'
+                   , mValues = sortBy (compare `on` Val.symbolIndexValue) . Set.toList . Set.map fixType $ globalValues
+                   , mDecls = sortBy (compare `on` Val.symbolIndexValue) . Set.toList $ refFns
+                   , mDefns = sortBy (compare `on` Val.symbolIndexValue) . Set.toList $ defFns
+                   , mFns = fns' -- map updateFunction fns'
                    , mTypes = types 
-                   , mConsts = Set.map fixType consts 
-                   })
+                   , mConsts = sortBy (compare `on` Val.symbolIndexValue) . Set.toList . Set.map fixType $ consts 
+                   }
 
 --------------------------------------------------------------------------------
 -- I/O

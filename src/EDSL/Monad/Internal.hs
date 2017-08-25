@@ -1,7 +1,10 @@
 {-# OPTIONS_GHC -fprof-auto #-}
 {-# LANGUAGE LambdaCase, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TupleSections #-}
+{-# LANGUAGE BangPatterns, CPP #-}
 module EDSL.Monad.Internal
   (BodyBuilderT, BodyBuilder, BodyBuilderResult(..), Resolver
+  , Labels, Consts, Types
   , runBodyBuilderT
   , execBodyBuilderT
   , execBodyBuilder
@@ -12,9 +15,14 @@ module EDSL.Monad.Internal
   , tellNewBlock, askBlocks, takeBlocks
   -- * Labels, Globals, Constant and Types
   , tellLabel, askLabels
-  , tellGlobal, askGlobals
+  , tellFunc, tellDecl
+  , tellGlobal', tellGlobal, askGlobals
   , tellConst, askConsts
   , tellType, askTypes
+  , askDecls, askFuncs
+  , buildResolver, setResolver 
+  , Offset
+  , setGOffset, setDOffset, setFOffset, setCOffset
   -- * Debugging
   , askInsts
   , tellLog
@@ -25,6 +33,8 @@ module EDSL.Monad.Internal
 
 import Control.Monad.Fix (MonadFix(..))
 
+import EDSL.Monad.Default
+
 import Data.BitCode.LLVM.Types (BasicBlockId)
 import Data.BitCode.LLVM.Util
 import Data.BitCode.LLVM.Pretty
@@ -32,20 +42,109 @@ import Data.BitCode.LLVM.Classes.HasType
 import Text.PrettyPrint
 import Data.Maybe (fromMaybe)
 import qualified Data.BitCode.LLVM.Instruction     as Inst
-import qualified Data.BitCode.LLVM.Function        as Func
+import qualified Data.BitCode.LLVM.Function        as Fn
 import qualified Data.BitCode.LLVM.Value           as Val
 import qualified Data.BitCode.LLVM.Type            as Ty
 import Data.Set (Set)
 import qualified Data.Set as Set
+import qualified Data.Map as Map
 
+import Control.Monad (forM)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.State
 import Data.Functor.Identity
 import Control.Monad.Trans.Class
 
-import Debug.Trace
+import qualified Debug.Trace as Trace
 
 import GHC.Stack (HasCallStack)
+
+import Data.Word (Word64)
+
+--import qualified Data.Set.Internal as SetI
+import Data.Set.Internal (Set(Bin, Tip))
+import EDSL.Monad.PtrEquality (ptrEq)
+#if __GLASGOW_HASKELL__
+import GHC.Exts ( build, lazy )
+#endif
+
+trace :: String -> a -> a
+trace _ x = x
+-- trace = Trace.trace
+-- traceM :: Applicative f => String -> f () 
+-- traceM = Trace.traceM
+
+delta,ratio :: Int
+delta = 3
+ratio = 2
+
+balanceL :: a -> Set a -> Set a -> Set a
+balanceL x l r = case r of
+  Tip -> case l of
+           Tip -> Bin 1 x Tip Tip
+           (Bin _ _ Tip Tip) -> Bin 2 x l Tip
+           (Bin _ lx Tip (Bin _ lrx _ _)) -> Bin 3 lrx (Bin 1 lx Tip Tip) (Bin 1 x Tip Tip)
+           (Bin _ lx ll@(Bin _ _ _ _) Tip) -> Bin 3 lx ll (Bin 1 x Tip Tip)
+           (Bin ls lx ll@(Bin lls _ _ _) lr@(Bin lrs lrx lrl lrr))
+             | lrs < ratio*lls -> Bin (1+ls) lx ll (Bin (1+lrs) x lr Tip)
+             | otherwise -> Bin (1+ls) lrx (Bin (1+lls+Set.size lrl) lx ll lrl) (Bin (1+Set.size lrr) x lrr Tip)
+
+  (Bin rs _ _ _) -> case l of
+           Tip -> Bin (1+rs) x Tip r
+
+           (Bin ls lx ll lr)
+              | ls > delta*rs  -> case (ll, lr) of
+                   (Bin lls _ _ _, Bin lrs lrx lrl lrr)
+                     | lrs < ratio*lls -> Bin (1+ls+rs) lx ll (Bin (1+rs+lrs) x lr r)
+                     | otherwise -> Bin (1+ls+rs) lrx (Bin (1+lls+Set.size lrl) lx ll lrl) (Bin (1+rs+Set.size lrr) x lrr r)
+                   (_, _) -> error "Failure in Data.Map.balanceL"
+              | otherwise -> Bin (1+ls+rs) x l r
+{-# NOINLINE balanceL #-}
+
+-- balanceR is called when right subtree might have been inserted to or when
+-- left subtree might have been deleted from.
+balanceR :: a -> Set a -> Set a -> Set a
+balanceR x l r = case l of
+  Tip -> case r of
+           Tip -> Bin 1 x Tip Tip
+           (Bin _ _ Tip Tip) -> Bin 2 x Tip r
+           (Bin _ rx Tip rr@(Bin _ _ _ _)) -> Bin 3 rx (Bin 1 x Tip Tip) rr
+           (Bin _ rx (Bin _ rlx _ _) Tip) -> Bin 3 rlx (Bin 1 x Tip Tip) (Bin 1 rx Tip Tip)
+           (Bin rs rx rl@(Bin rls rlx rll rlr) rr@(Bin rrs _ _ _))
+             | rls < ratio*rrs -> Bin (1+rs) rx (Bin (1+rls) x Tip rl) rr
+             | otherwise -> Bin (1+rs) rlx (Bin (1+Set.size rll) x Tip rll) (Bin (1+rrs+Set.size rlr) rx rlr rr)
+
+  (Bin ls _ _ _) -> case r of
+           Tip -> Bin (1+ls) x l Tip
+
+           (Bin rs rx rl rr)
+              | rs > delta*ls  -> case (rl, rr) of
+                   (Bin rls rlx rll rlr, Bin rrs _ _ _)
+                     | rls < ratio*rrs -> Bin (1+ls+rs) rx (Bin (1+ls+rls) x l rl) rr
+                     | otherwise -> Bin (1+ls+rs) rlx (Bin (1+ls+Set.size rll) x l rll) (Bin (1+rrs+Set.size rlr) rx rlr rr)
+                   (_, _) -> error "Failure in Data.Map.balanceR"
+              | otherwise -> Bin (1+ls+rs) x l r
+{-# NOINLINE balanceR #-}
+
+insert' :: Ord a => a -> Set a -> (a, Set a)
+insert' x0 = go x0 x0
+  where
+    go :: Ord a => a -> a -> Set a -> (a, Set a)
+    go orig !_ Tip = (orig, Set.singleton (lazy orig))
+    go orig !x t@(Bin sz y l r) = case compare x y of
+        LT | l' `ptrEq` l -> (y, t)
+           | otherwise -> (orig', balanceL y l' r)
+           where (orig', !l') = go orig x l
+        GT | r' `ptrEq` r -> (y, t)
+           | otherwise -> (orig', balanceR y l r')
+           where (orig', !r') = go orig x r
+        EQ -> (y, t)
+#if __GLASGOW_HASKELL__
+{-# INLINABLE insert' #-}
+#else
+{-# INLINE insert' #-}
+#endif
+
 
 --------------------------------------------------------------------------------
 -- Function Body Monad... or building blocks is monadic.
@@ -53,24 +152,30 @@ import GHC.Stack (HasCallStack)
 -- and we need to provide some form of unique symbol supply
 -- the simples being a counter.
 
-type Labels = Set (String, Ty.Ty)
+newtype Label = Label (String, Ty.Ty, Maybe Val.Value) deriving (Ord, Eq, Show)
+
+type Labels = Set Label
 type Consts = Set Val.Symbol
 type Globals = Set Val.Symbol
+type Funcs  = Set Val.Symbol
+type Decls  = Set Val.Symbol
 type Types = Set Ty.Ty
 
-type Resolver = String -> Val.Value
+type Resolver = String -> Val.Symbol
 
 data FnCtx = FnCtx
   { nInst :: Int
   , nRef :: Int
   , nBlocks :: Int
-  , blocks :: [Func.BasicBlock]
+  , blocks :: [Fn.BasicBlock]
   -- extracing globals and labels
   -- after building them up from the
   -- function blocks is too expensive.
   -- Therefore we collect Globals and
   -- Labels during the construction.
   , globals :: Globals
+  , funcs  :: Funcs
+  , decls  :: Decls
   , consts :: Consts
   , labels :: Labels
   , types :: Types
@@ -79,17 +184,22 @@ data FnCtx = FnCtx
   , _insts :: [Inst.Inst]
   -- label resolver
   , resolver :: Resolver
+  , gOffset :: Word64 -> Word64
+  , dOffset :: Word64 -> Word64
+  , fOffset :: Word64 -> Word64
+  , cOffset :: Word64 -> Word64
   }
 
-mkCtx i r = FnCtx i 0 0 mempty Set.empty Set.empty Set.empty Set.empty mempty mempty r
+mkCtx i = FnCtx i 0 0 mempty Set.empty Set.empty Set.empty Set.empty Set.empty Set.empty mempty mempty
+          (error "no resolver") (error "no gOffset") (error "no dOffset") (error "no fOffset") (error "no cOffset")
 -- instance Monoid FnCtx where
 --   mempty = FnCtx 0 0 mempty
 --   (FnCtx is bs bbs) `mappend` (FnCtx is' bs' bbs') = FnCtx (is + is') (bs + bs') (bbs `mappend` shift is bs bbs')
---     where shift m n (Func.BasicBlock bi) = Func.BasicBlock $ map (shiftBB m n) bi
---           shift m n (Func.NamedBlock name bi) = Func.NamedBlock name $ map (shiftBB m n) bi
---           shiftBB :: Int -> Int -> Func.BasicBlock -> Func.BasicBlock
+--     where shift m n (Fn.BasicBlock bi) = Fn.BasicBlock $ map (shiftBB m n) bi
+--           shift m n (Fn.NamedBlock name bi) = Fn.NamedBlock name $ map (shiftBB m n) bi
+--           shiftBB :: Int -> Int -> Fn.BasicBlock -> Fn.BasicBlock
 --           shiftBB m n = map (shiftBI m n)
---           shiftBI :: Int -> Int -> Func.BlockInst -> Func.BlockInst
+--           shiftBI :: Int -> Int -> Fn.BlockInst -> Fn.BlockInst
 --           shiftBI m n (mb, i) = (shiftS m n <$> mb, shiftI m n i)
 --           shiftS m n (Val.Named name v) = (Val.Named name (shiftV m n v))
 --           shiftS m n (Val.Unnamed v)    = (Val.Unnamed (shiftV m n v))
@@ -102,7 +212,7 @@ newtype BodyBuilderT m a = BodyBuilderT { unBodyBuilderT :: StateT FnCtx m a }
   deriving (Functor, Applicative, Monad, MonadTrans, MonadFix, MonadIO)
 
 data BodyBuilderResult = BBR
-  { _blocks  :: [Func.BasicBlock]
+  { _blocks  :: [Fn.BasicBlock]
   , _globals :: Globals
   , _consts  :: Consts
   , _labels  :: Labels
@@ -118,31 +228,31 @@ getsCtx :: (HasCallStack, Monad m) => (FnCtx -> a) -> BodyBuilderT m a
 getsCtx = BodyBuilderT . gets
 
 -- mapping over blocks
-runBodyBuilderT :: (HasCallStack, Monad m) => Resolver -> Int -> BodyBuilderT m a -> m (a, BodyBuilderResult)
-runBodyBuilderT resolver instOffset = fmap mkResult . flip runStateT (mkCtx instOffset resolver) . unBodyBuilderT
+runBodyBuilderT :: (HasCallStack, Monad m) => Int -> BodyBuilderT m a -> m (a, BodyBuilderResult)
+runBodyBuilderT instOffset = fmap mkResult . flip runStateT (mkCtx instOffset) . unBodyBuilderT
   where
     mkResult :: (a, FnCtx) -> (a, BodyBuilderResult)
     mkResult (a, s) = (a, BBR (reverseBlocks s) (globals s) (consts s) (labels s) (types s))
-    reverseBlocks :: FnCtx -> [Func.BasicBlock]
-    reverseBlocks = map (Func.bbmap reverse) . reverse . blocks
+    reverseBlocks :: FnCtx -> [Fn.BasicBlock]
+    reverseBlocks = map (Fn.bbmap reverse) . reverse . blocks
 
-execBodyBuilderT :: (HasCallStack, Monad m) => Resolver -> Int -> BodyBuilderT m a -> m BodyBuilderResult
-execBodyBuilderT resolver instOffset = fmap snd . runBodyBuilderT resolver instOffset
+execBodyBuilderT :: (HasCallStack, Monad m) => Int -> BodyBuilderT m a -> m BodyBuilderResult
+execBodyBuilderT instOffset = fmap snd . runBodyBuilderT instOffset
 
-execBodyBuilder :: HasCallStack => Resolver -> Int -> BodyBuilderT Identity a -> BodyBuilderResult
-execBodyBuilder resolver instOffset = runIdentity . execBodyBuilderT resolver instOffset
+execBodyBuilder :: HasCallStack => Int -> BodyBuilderT Identity a -> BodyBuilderResult
+execBodyBuilder instOffset = runIdentity . execBodyBuilderT instOffset
 
-evalBodyBuilderT :: (HasCallStack, Monad m) => Resolver -> Int -> BodyBuilderT m a -> m a
-evalBodyBuilderT resolver instOffset = flip evalStateT (mkCtx instOffset resolver) . unBodyBuilderT
+evalBodyBuilderT :: (HasCallStack, Monad m) => Int -> BodyBuilderT m a -> m a
+evalBodyBuilderT instOffset = flip evalStateT (mkCtx instOffset) . unBodyBuilderT
 
-evalBodyBuilder :: HasCallStack => Resolver -> Int -> BodyBuilderT Identity a -> a
-evalBodyBuilder resolver instOffset = runIdentity . evalBodyBuilderT resolver instOffset
+evalBodyBuilder :: HasCallStack => Int -> BodyBuilderT Identity a -> a
+evalBodyBuilder instOffset = runIdentity . evalBodyBuilderT instOffset
 
 
 -- | Adds an instruction to a block.
-addInst :: Func.BasicBlock -> Func.BlockInst -> Func.BasicBlock
-addInst (Func.BasicBlock is) i = (Func.BasicBlock (i:is))
-addInst (Func.NamedBlock n is) i = (Func.NamedBlock n (i:is))
+addInst :: Fn.BasicBlock -> Fn.BlockInst -> Fn.BasicBlock
+addInst (Fn.BasicBlock is) i = (Fn.BasicBlock (i:is))
+addInst (Fn.NamedBlock n is) i = (Fn.NamedBlock n (i:is))
 
 tellLog :: Monad m => String -> BodyBuilderT m ()
 tellLog l = modifyCtx (\c -> c { _log = l:(_log c) })
@@ -153,39 +263,82 @@ tellLogShow = tellLog . show
 askLog :: Monad m => BodyBuilderT m String
 askLog = unlines . fmap ('\t':) . reverse <$> getsCtx _log
 
-askInsts :: Monad m => Int -> BodyBuilderT m [Func.BlockInst]
+askInsts :: Monad m => Int -> BodyBuilderT m [Fn.BlockInst]
 askInsts n = do
   bbs <- getsCtx blocks
   if (null bbs)
     then return []
     else return . reverse . take n . blockInsts . head $ bbs 
   where
-    blockInsts :: Func.BasicBlock -> [Func.BlockInst]
-    blockInsts (Func.BasicBlock is) = is
-    blockInsts (Func.NamedBlock _ is) = is
+    blockInsts :: Fn.BasicBlock -> [Fn.BlockInst]
+    blockInsts (Fn.BasicBlock is) = is
+    blockInsts (Fn.NamedBlock _ is) = is
 
 
-tellLabel :: (HasCallStack, Monad m) => String -> Ty.Ty -> BodyBuilderT m Val.Symbol
-tellLabel name t = do
-  modifyCtx (\ctx -> ctx { labels = Set.insert (name, t) (labels ctx) })
-  res <- getsCtx resolver
-  return $ Val.Named name t (res name)
+tellLabel :: (HasCallStack, Monad m) => String -> Ty.Ty -> Maybe Val.Value -> BodyBuilderT m Val.Symbol
+tellLabel name t mbVal = do
+  modifyCtx (\ctx -> ctx { labels = Set.insert (Label (name, t, mbVal)) (labels ctx) })
+  resolve <- getsCtx resolver
+  return $ Val.Lazy name t (const (resolve name))
 
 askLabels :: Monad m => BodyBuilderT m Labels
 askLabels = getsCtx labels
 
 tellGlobal :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
-tellGlobal g = do
-  modifyCtx (\ctx -> ctx { globals = Set.insert g (globals ctx) })
-  return g
+tellGlobal g = case Val.symbolValue g of
+  Val.Function{} -> tellFunction g
+  Val.Global{}   -> tellGlobal'  g
+  Val.Constant{} -> tellConst    g
+
+tellFunction :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellFunction f = case Val.feProto (Val.fExtra (Val.symbolValue f)) of
+  True  -> tellDecl f
+  False -> tellFunc f
+
+tellDecl :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellDecl f = do
+  decls  <- askDecls
+  offset <- getsCtx dOffset
+  let i = fromIntegral $ Set.size decls
+      (f', decls') = insert' (Val.withIndex (\_ -> offset i) f) decls
+  modifyCtx (\ctx -> ctx { decls = decls' })
+  return f'
+
+askDecls :: Monad m => BodyBuilderT m Decls
+askDecls = getsCtx decls
+
+tellFunc :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellFunc f = do
+  funcs <- askFuncs
+  offset <- getsCtx fOffset
+  let i = fromIntegral $ Set.size funcs
+      (f', funcs') = insert' (Val.withIndex (\_ -> offset i) f) funcs
+  modifyCtx (\ctx -> ctx { funcs = funcs' })
+  return f'
+
+askFuncs :: Monad m => BodyBuilderT m Funcs
+askFuncs = getsCtx funcs
+
+tellGlobal' :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellGlobal' g = do
+  globals <- askGlobals
+  offset  <- getsCtx gOffset
+  let i = fromIntegral $ Set.size globals
+      (g',globals') = insert' (Val.withIndex (\_ -> offset i) g) globals
+  modifyCtx (\ctx -> ctx { globals = globals' })
+  return g'
 
 askGlobals :: Monad m => BodyBuilderT m Globals
 askGlobals = getsCtx globals
 
 tellConst :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
 tellConst c = do
-  modifyCtx (\ctx -> ctx { consts = Set.insert c (consts ctx) })
-  return c
+  consts <- askConsts
+  offset <- getsCtx cOffset
+  let i = fromIntegral $ Set.size consts
+      (c', consts') = insert' (Val.withIndex (\_ -> offset i) c) consts 
+  modifyCtx (\ctx -> ctx { consts = consts' })
+  return c'
 
 askConsts :: Monad m => BodyBuilderT m Consts
 askConsts = getsCtx consts
@@ -197,6 +350,27 @@ tellType t = do
 
 askTypes :: Monad m => BodyBuilderT m Types
 askTypes = getsCtx types
+
+
+instName :: Inst.Inst -> String
+instName (Inst.BinOp _ _ _ _ _) = "BinOp"
+instName (Inst.Cast _t _op _s)      = "Cast (" ++ show _op ++ ")"
+instName (Inst.Alloca _ _ _)    = "Alloca"
+instName (Inst.Load _ _ _)      = "Load"
+instName (Inst.Store _ _ _)     = "Store"
+instName (Inst.Call{})          = "Call"
+instName (Inst.Cmp2 _ _ _ _)    = "Cmp2"
+instName (Inst.Gep _ _ _ _)     = "Gep"
+instName (Inst.ExtractValue _ _) = "ExtractValue"
+instName (Inst.Ret _)           = "Ret"
+instName (Inst.UBr _)           = "Ubr"
+instName (Inst.Br _ _ _)        = "Br"
+instName (Inst.Switch _ _ _)    = "Switch"
+instName (Inst.Fence _ _)       = "Fence"
+instName (Inst.CmpXchg _ _ _ _ _ _) = "CmpXchg"
+instName (Inst.AtomicRMW _ _ _ _ _) = "AtomicRMW"
+instName (Inst.AtomicStore _ _ _ _ _) = "Atomic Store"
+instName (Inst.AtomicLoad _ _ _ _ _) = "Atomic Load"
 
 -- | Add an instruction to the current block.
 -- returns @Just ref@ if the instruction retuns
@@ -210,7 +384,7 @@ tellInst inst = do
   modifyCtx (\c -> c { _insts = inst:(_insts c) })
   
   nr <- getsCtx nRef
-  case (\v -> Val.Unnamed (ty v) v) . flip Val.TRef nr <$> instTy inst of
+  case (\t -> Val.mkUnnamed t $ Val.TRef t nr) <$> instTy inst of
     ref@(Just s) -> do tellType (ty s) -- record the instruction type
                        modifyCtx (\ctx -> ctx { nInst  = 1 + nInst ctx
                                               , nRef   = 1 + nRef ctx
@@ -230,22 +404,22 @@ tellInst inst = do
 tellInst' :: Monad m => Inst.Inst -> BodyBuilderT m Val.Symbol
 tellInst' inst = tellInst inst >>= \case
   Just s -> pure s
-  Nothing -> fail ("Expected instruction " ++ show inst ++ " to return a symbol!")
+  Nothing -> error ("Expected instruction " ++ instName inst ++ " to return a symbol!")
 
 -- | Adds a new block to the function.
 tellNewBlock :: Monad m => BodyBuilderT m BasicBlockId
 tellNewBlock = do
   blockId <- getsCtx (fromIntegral . nBlocks)
-  modifyCtx (\c -> c { nBlocks = (nBlocks c) + 1, blocks = (Func.BasicBlock []):blocks c})
+  modifyCtx (\c -> c { nBlocks = (nBlocks c) + 1, blocks = (Fn.BasicBlock []):blocks c})
   return blockId
 
-askBlocks :: Monad m => BodyBuilderT m [Func.BasicBlock]
+askBlocks :: Monad m => BodyBuilderT m [Fn.BasicBlock]
 askBlocks = reverseBlocks <$> getsCtx blocks
   where
-    reverseBlocks :: [Func.BasicBlock] -> [Func.BasicBlock]
-    reverseBlocks = map (Func.bbmap reverse) . reverse
+    reverseBlocks :: [Fn.BasicBlock] -> [Fn.BasicBlock]
+    reverseBlocks = map (Fn.bbmap reverse) . reverse
 
-takeBlocks :: Monad m => Int -> BodyBuilderT m [Func.BasicBlock]
+takeBlocks :: Monad m => Int -> BodyBuilderT m [Fn.BasicBlock]
 takeBlocks i = do
   blocks <- askBlocks
   modifyCtx (\ctx -> ctx { nInst = i
@@ -254,3 +428,35 @@ takeBlocks i = do
                          , blocks = mempty
                          })
   return blocks
+
+
+--
+
+buildResolver :: Monad m => BodyBuilderT m Resolver
+buildResolver = do
+  defFns <- askFuncs
+  refFns <- askDecls
+  globs  <- askGlobals
+  labels <- Set.toList <$> askLabels
+  let namedValuesMap = Map.fromList [(n, s) | s@(Val.Named n _i _t _v) <- (Set.toList (Set.unions [defFns, refFns, globs]))]
+  map <- Map.fromList <$> (forM labels $ \(Label (n, t, mbVal)) -> case (Map.lookup n namedValuesMap, mbVal) of
+                              (Just s,  _      ) -> return (n, s)
+                              (Nothing, Just v ) -> (n,) <$> tellGlobal (Val.mkNamed t n v)
+                              (Nothing, Nothing) -> (n,) <$> tellGlobal (Val.mkNamed t n (defGlobal t)))
+  
+  return $ \key -> fromMaybe (error "bad resolver!")
+                   . flip Map.lookup map
+                   $ key
+    
+
+setResolver :: Monad m => Resolver -> BodyBuilderT m ()
+setResolver r = modifyCtx (\ctx -> ctx { resolver = r })
+
+type Offset = Word64 -> Word64
+
+setGOffset, setDOffset, setFOffset, setCOffset :: Monad m => Offset -> BodyBuilderT m ()
+setGOffset o = modifyCtx (\ctx -> ctx { gOffset = o })
+setDOffset o = modifyCtx (\ctx -> ctx { dOffset = o })
+setFOffset o = modifyCtx (\ctx -> ctx { fOffset = o })
+setCOffset o = modifyCtx (\ctx -> ctx { cOffset = o })
+

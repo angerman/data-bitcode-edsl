@@ -46,12 +46,14 @@ library
       EDSL.Monad.Instructions
       Playground.EDSL
       Playground.Reader
+      EDSL.Monad.Default
   other-modules:
       EDSL.Monad.Instructions.Cast
       EDSL.Monad.Instructions.Binary
       EDSL.Monad.Instructions.Compare
       EDSL.Monad.Instructions.Atomic
       EDSL.Monad.Instructions.Constant
+      EDSL.Monad.PtrEquality
   default-language: Haskell2010
 
 test-suite spec

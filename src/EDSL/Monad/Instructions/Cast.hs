@@ -15,11 +15,13 @@ import Text.PrettyPrint
 
 import GHC.Stack (HasCallStack)
 
+import Debug.Trace
+
 -- ** Cast
 trunc, zext, sext, fpToUi, fpToSi, uiToFp, siToFp, fpTrunc, fpExt, ptrToInt, intToPtr, bitcast, addrSpCast
   :: (HasCallStack, Monad m) => Ty -> Symbol -> EdslT m Symbol
 mkCast :: (HasCallStack, Monad m) => CastOp -> Ty -> Symbol -> EdslT m Symbol
-mkCast op t = tellInst' . Inst.Cast t op
+mkCast op t = tellInst' . Inst.Cast t op 
 
 trunc t = mkCast TRUNC t
 zext t s | ty s /= t = mkCast ZEXT t s
@@ -32,9 +34,11 @@ uiToFp  t = mkCast UITOFP t
 siToFp  t = mkCast SITOFP t
 fpTrunc t = mkCast FPTRUNC t
 fpExt   t = mkCast FPEXT t
-ptrToInt t s | isPtr (ty s) = mkCast PTRTOINT t s
-             | otherwise    = sthrowE $ text "Cannot ptr-to-int cast:" <+> pretty s <+> text "to" <+> pretty t <> text ", symbol not a pointer!"
-intToPtr t s | isInt (ty s) = mkCast INTTOPTR t s
-             | otherwise    = sthrowE $ text "Cannot int-to-ptr cast:" <+> pretty s <+> text "to" <+> pretty t <> text ", symbol not an integer!"
+ptrToInt t = mkCast PTRTOINT t
+-- ptrToInt t s | isPtr (ty s) = mkCast PTRTOINT t s
+--              | otherwise    = sthrowE $ text "Cannot ptr-to-int cast:" <+> pretty s <+> text "to" <+> pretty t <> text ", symbol not a pointer!"
+intToPtr t = mkCast INTTOPTR t
+-- intToPtr t s | isInt (ty s) = mkCast INTTOPTR t s
+--             | otherwise    = sthrowE $ text "Cannot int-to-ptr cast:" <+> pretty s <+> text "to" <+> pretty t <> text ", symbol not an integer!"
 bitcast t = mkCast BITCAST  t
 addrSpCast t = mkCast ADDRSPACECAST t

@@ -145,6 +145,7 @@ spec_edsl = do
                   ret =<< int32 0
                 pure ()
             ]
+      -- putStrLn . show . pretty $ testModule 
       writeModule bcfile testModule
       decompile bcfile `shouldReturn` (bcfile -<.> "dis")
       compile bcfile `shouldReturn` (bcfile -<.> "exe")
@@ -182,7 +183,7 @@ spec_edsl = do
                   ret =<< int32 0
                 pure ()
             ]
-      -- putStrLn . show . pretty $ testModule
+      putStrLn . show . pretty $ testModule
       writeModule bcfile testModule
       decompile bcfile `shouldReturn` (bcfile -<.> "dis")
       compile bcfile `shouldReturn` (bcfile -<.> "exe")
@@ -212,7 +213,7 @@ spec_edsl = do
       let bcfile = "test/prefix_data.bc"
           testModule :: Module
           testModule = mod "undef"
-            [ withPrefixDataM prefix $ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
+            [ defM (withPrefixData <$> prefix) "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
                   -- we will obtain the argc and argv slot to populate the local instruction and
                   -- refernece count here
@@ -230,6 +231,7 @@ spec_edsl = do
                 pure ()
             ]
             where prefix = struct =<< sequence [(int32 1), (int32 10), (int32 11)]
+      -- putStrLn . show . pretty $ testModule 
       writeModule bcfile testModule
       decompile bcfile `shouldReturn` (bcfile -<.> "dis")
       compile bcfile `shouldReturn` (bcfile -<.> "exe")

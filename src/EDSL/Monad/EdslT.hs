@@ -1,5 +1,6 @@
 {-# OPTIONS_GHC -fprof-auto #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE RecursiveDo #-}
 module EDSL.Monad.EdslT
   (
     M.BodyBuilderT
@@ -8,9 +9,11 @@ module EDSL.Monad.EdslT
   , EdslT, Edsl
   , runEdslT, evalEdslT, evalEdsl
   , serror, sthrowE, exceptT
-  , tellLabel, tellGlobal, tellType, tellConst
+  , tellFunc, tellDecl
+  , tellLabel, tellGlobal, tellGlobal', tellType, tellConst
   , tellInst, tellInst'
   , askBlocks, askLabels, askConsts, askGlobals, askTypes
+  , withResolver
   )
   where
 
@@ -19,13 +22,16 @@ import qualified Data.BitCode.LLVM.Instruction as Inst (Inst)
 
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT(..), throwE, runExceptT)
+import Control.Monad.Fix (MonadFix)
 import Data.Functor.Identity (Identity, runIdentity)
 import Data.BitCode.LLVM.Pretty (pretty)
-import Data.BitCode.LLVM.Value (Symbol)
+import Data.BitCode.LLVM.Value (Value, Symbol, trace, traceM)
 import Data.BitCode.LLVM.Type  (Ty)
 import Data.BitCode.LLVM.Function (BasicBlock)
 
 import Data.Set (Set)
+
+import GHC.Stack (HasCallStack)
 
 type Error = String
 type Inst = Either Error Inst.Inst
@@ -33,22 +39,30 @@ type Inst = Either Error Inst.Inst
 type EdslT m a = ExceptT Error (M.BodyBuilderT m) a
 type Edsl a = ExceptT Error (M.BodyBuilderT Identity) a
 
+
 --      runExceptT :: ExceptT e m a -> m (Either e a)
 -- runBodyBuilderT :: Int -> BodyBuilderT m a -> m (a, BodyBuilderResult)
 
-runEdslT :: Monad m => M.Resolver -> Int -> EdslT m a -> m (Either Error (a, M.BodyBuilderResult))
-runEdslT r i = fmap (\(a, b) -> fmap (,b) a) . M.runBodyBuilderT r i . runExceptT
+withResolver :: (HasCallStack, Monad m, MonadFix m) => EdslT m a -> EdslT m a
+withResolver a = mdo
+  lift (M.setResolver r)
+  a' <- a
+  r <- lift M.buildResolver
+  return a'
 
-evalEdslT :: Monad m => M.Resolver -> Int -> EdslT m a -> m (Either Error a)
-evalEdslT r i = M.evalBodyBuilderT r i . runExceptT
+runEdslT :: (HasCallStack, Monad m, MonadFix m) => Int -> EdslT m a -> m (Either Error (a, M.BodyBuilderResult))
+runEdslT i = fmap (\(a, b) -> fmap (,b) a) . M.runBodyBuilderT i . runExceptT . withResolver
 
-evalEdsl :: M.Resolver -> Int -> Edsl a -> Either Error a
-evalEdsl r i = runIdentity . evalEdslT r i 
+evalEdslT :: (HasCallStack, Monad m, MonadFix m) => Int -> EdslT m a -> m (Either Error a)
+evalEdslT i = M.evalBodyBuilderT i . runExceptT . withResolver
 
-serror :: (Show a) => a -> Inst
+evalEdsl :: HasCallStack => Int -> Edsl a -> Either Error a
+evalEdsl i = runIdentity . evalEdslT i 
+
+serror :: (HasCallStack, Show a) => a -> Inst
 serror = Left . show
 
-exceptT :: Monad m => Either Error a -> EdslT m a
+exceptT :: (HasCallStack, Monad m) => Either Error a -> EdslT m a
 exceptT res = case res of
   r@(Right{}) -> ExceptT (pure r)
   (Left errMsg) -> do
@@ -59,11 +73,15 @@ exceptT res = case res of
 sthrowE :: (Monad m, Show a) => a -> ExceptT Error m b
 sthrowE = throwE . show
 
-tellLabel :: (Monad m) => String -> Ty -> EdslT m Symbol
-tellLabel name = lift . M.tellLabel name
-tellConst, tellGlobal :: (Monad m) => Symbol -> EdslT m Symbol
+tellLabel :: (HasCallStack, Monad m) => String -> Ty -> Maybe Value -> EdslT m Symbol
+tellLabel name ty = lift . M.tellLabel name ty
+tellConst, tellGlobal, tellGlobal', tellFunc, tellDecl :: (HasCallStack, Monad m) => Symbol -> EdslT m Symbol
 tellConst = lift . M.tellConst
 tellGlobal = lift . M.tellGlobal
+tellGlobal' = lift . M.tellGlobal'
+tellFunc = lift . M.tellFunc
+tellDecl = lift . M.tellDecl
+
 tellType :: Monad m => Ty -> EdslT m Ty
 tellType = lift . M.tellType
 
@@ -76,10 +94,10 @@ tellInst' = lift . M.tellInst'
 askBlocks :: Monad m => EdslT m [BasicBlock]
 askBlocks = lift M.askBlocks
 
-askLabels :: Monad m => EdslT m (Set (String, Ty))
+askLabels :: Monad m => EdslT m M.Labels
 askLabels = lift M.askLabels
-askConsts, askGlobals :: Monad m => EdslT m (Set Symbol)
+askConsts, askGlobals :: Monad m => EdslT m M.Consts
 askConsts = lift M.askConsts
 askGlobals = lift M.askGlobals
-askTypes :: Monad m => EdslT m (Set Ty)
+askTypes :: Monad m => EdslT m M.Types
 askTypes = lift M.askTypes

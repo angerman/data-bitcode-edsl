@@ -78,7 +78,7 @@ testToSymbols f = testParse f >>= \case
 
 testToNBitCode :: [NBitCode]
 testToNBitCode = toBitCode (Just (Ident "TinyBitCode" Current),
-                            (Module 1 Nothing Nothing [] [] [] Set.empty Set.empty))
+                            (Module 1 Nothing Nothing [] [] [] [] [] Set.empty))
 
 testToBitCode :: [BitCode]
 testToBitCode = map denormalize $ testToNBitCode
