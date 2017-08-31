@@ -1,1 +1,1 @@
-packages: *.cabal ../data-bitcode-llvm/*.cabal ../data-bitcode/*.cabal
+packages: *.cabal ../data-bitcode-llvm/*.cabal ../data-bitcode/*.cabal ../data-bitstream/*.cabal

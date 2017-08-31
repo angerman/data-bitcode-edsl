@@ -68,10 +68,10 @@ call' tck cc f args
   = sthrowE $ text "Cannot call: " <+> (pretty f <+> text "with insufficent arguments."
                                               $+$ text "Params" <+> P.int (length (funParamTys (ty f))) <> text ":" <+> pretty (funParamTys (ty f))
                                               $+$ text "Args  " <+> P.int (length args) <> text ":" <+> pretty args)
-  | not . Prelude.and $ zipWith (==) (map ty args) (funParamTys (ty f))
-  = sthrowE $ text "Cannot call: " <+> (pretty f <+> text "text with arguments, not matching the signature."
-                                             $+$ text "Sig :" <+> pretty (funParamTys (ty f))
-                                             $+$ text "Args:" <+> pretty (map ty args))
+--  | not . Prelude.and $ zipWith (==) (map ty args) (funParamTys (ty f))
+--  = sthrowE $ text "Cannot call: " <+> (pretty f <+> text "text with arguments, not matching the signature."
+--                                             $+$ text "Sig :" <+> pretty (funParamTys (ty f))
+--                                             $+$ text "Args:" <+> pretty (map ty args))
   -- otherwise asssume function. We must not look into the function value, otherwise the lazyness
   -- required for the lazy "label" resolution is impossible.
   | otherwise = case isPtr (ty f) of

@@ -12,6 +12,8 @@ import Data.BitCode.LLVM.Classes.HasType (ty)
 import Data.Maybe
 import Data.BitCode.LLVM (Module)
 
+import Data.BitCode.LLVM.Value (external, private)
+
 import Data.BitCode.LLVM.Types (BasicBlockId)
 -- import EDSL.Monad (BodyBuilder)
 
@@ -28,12 +30,12 @@ helloBranch = mod "helloWorld"
         cond <- argc `iugt` constOne 
         br cond one two
       one <- block "one" $ do
-        strPtr <- bind2 gep (global "one" =<< cStr "One") (sequence [int32 0, int32 0])
+        strPtr <- bind2 gep (global private "one" =<< cStr "One") (sequence [int32 0, int32 0])
         puts <- fun "puts" =<< [i8ptr] --> i32
         ccall puts [strPtr]
         ret =<< int32 0
       two <- block "two" $ do
-        two <- global "two" =<< cStr "Two" 
+        two <- global private "two" =<< cStr "Two" 
         strPtr <- gep two =<< sequence [int32 0, int32 0]
         f <- fun "puts" =<< [i8ptr] --> i32
         ccall f [strPtr]
@@ -45,7 +47,7 @@ lookup_ k = fromMaybe (fail "not found") . fmap pure . lookup k
 
 genBlock :: [(String, BasicBlockId)] -> String -> Edsl (String, BasicBlockId)
 genBlock idMap str = block' str $ do
-  g <- global str =<< cStr str 
+  g <- global private str =<< cStr str 
   strPtr <- gep g =<< sequence [int32 0, int32 0]
   puts <- fun "puts" =<< [i8ptr] --> i32
   ccall puts [strPtr]
@@ -72,7 +74,7 @@ helloPtrFn = mod "helloWorld"
         store ptrSlot ptr'
         intSlot' <- bind2 intToPtr (ptr =<< i64) (load ptrSlot)
         n <- load intSlot'
-        foo <- global "foo" =<< cStr "n: %d\n" 
+        foo <- global private "foo" =<< cStr "n: %d\n" 
         strPtr <- gep foo =<< sequence [int32 0, int32 0]
         printf <- fun "printf" =<< (vararg $ [i8ptr] --> i32) 
         ccall printf [strPtr, n]
@@ -83,7 +85,7 @@ helloPtrFn = mod "helloWorld"
         -- load puts.
         f <- load slot
         -- call puts.
-        foo' <- global "foo" =<< cStr "hello world\n"
+        foo' <- global private "foo" =<< cStr "hello world\n"
         strPtr <- gep foo' =<< sequence [int32 0, int32 0]
         puts <- fun "puts" =<< sig
         ccall puts [strPtr]
@@ -95,7 +97,7 @@ helloPtrFn = mod "helloWorld"
 helloWorld = mod "helloWorld"
   [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
-        foo <- global "foo" =<< cStr "hello world\n" 
+        foo <- global private "foo" =<< cStr "hello world\n" 
         strPtr <- gep foo =<< sequence [int32 0, int32 0]
         printf <- fun "printf" =<< (vararg $ [i8ptr] --> i32)
         ccall printf [strPtr]
@@ -106,7 +108,7 @@ gepFun = mod "helloWorld"
   [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
       block "entry" $ do
         p <- gep argv =<< sequence [int32 0]
-        foo <- global "foo" =<< cStr "hello world\n" 
+        foo <- global private "foo" =<< cStr "hello world\n" 
         strPtr <- gep foo =<< sequence [int32 0, int32 0]
         ret $ p
   ]
@@ -127,7 +129,7 @@ prefixDataFun = mod "prefixData"
         fp <- bind2 bitcast (ptr =<< ty <$> prefix) (fun "main" =<< [i32, ptr =<< i8ptr] --> i32)
         -- get the pointer to the data; and load it.
         v <- load =<< gep fp =<< sequence [int32 (-1), int32 1]
-        str <- global "str" =<< cStr "prefix data value: %d\n" 
+        str <- global private "str" =<< cStr "prefix data value: %d\n" 
         strPtr <- gep str =<< sequence [int32 0, int32 0]
         printf <- fun "printf" =<< (vararg $ [i8ptr] --> i32) 
         ccall printf [strPtr, v]

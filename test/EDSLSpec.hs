@@ -13,6 +13,7 @@ import EDSL.Monad.Instructions
 
 import Data.BitCode.LLVM (Module)
 import Data.BitCode.LLVM.Classes.HasType (ty)
+import Data.BitCode.LLVM.Value (private)
 
 import Data.BitCode.LLVM.Pretty
 
@@ -33,7 +34,11 @@ compile f = do
                         "" --stdin
   case exit of
     ExitSuccess -> return fout
-    err         -> error $ show err
+    err         -> error $ unlines ["Failed to compile (code: " ++ show err ++ ")"
+                                   ,"=============================="
+                                   , "STDOUT:", _out
+                                   , "STDERR:", _err
+                                   ]
   where
     fout = f -<.> "exe" -- yuck!
 
@@ -62,6 +67,15 @@ decompile f = do
 spec_edsl :: Spec
 spec_edsl = do
   describe "the bitcode edsl" $ do
+    it "should be able to produce an empty module" $ do
+      let bcfile = "test/empty.bc"
+          testModule = mod "empty" []
+
+      writeModule bcfile testModule
+      decompile bcfile `shouldReturn` (bcfile -<.> "dis")
+      -- compiling an empty module doesn't make sense, as
+      -- it contains no @main@.
+
     it "should be able to return the CMP result" $ do
       let bcfile = "test/cmp-ret.bc"
           testModule = mod "cmp-ret"
@@ -158,7 +172,7 @@ spec_edsl = do
             [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
                   mem <- undef =<< (arr 10 =<< i8)
-                  memG <- global "mem" mem 
+                  memG <- global private "mem" mem 
                   ptr <- gep memG =<< sequence [int32 0, int32 0]
                   memset <- fun "llvm.memset.p0i8.i32" =<< [i8ptr, i8, i32, i32, i1] --> void 
                   ccall memset =<< (ptr:) <$> sequence [ int8 0, int32 10, int32 4, int 1 0 ]
@@ -176,14 +190,14 @@ spec_edsl = do
           testModule = mod "undef"
             [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
-                  foo <- global "foo" =<< cStr "hello world\n" 
+                  foo <- global private "foo" =<< cStr "hello world\n" 
                   strPtr  <- gep foo =<< sequence [int32 0, int32 6]
                   printf <- fun "printf" =<< (vararg $ [i8ptr] --> i32)
                   ccall printf [strPtr]
                   ret =<< int32 0
                 pure ()
             ]
-      putStrLn . show . pretty $ testModule
+      -- putStrLn . show . pretty $ testModule
       writeModule bcfile testModule
       decompile bcfile `shouldReturn` (bcfile -<.> "dis")
       compile bcfile `shouldReturn` (bcfile -<.> "exe")
@@ -256,6 +270,47 @@ spec_edsl = do
       compile bcfile `shouldReturn` (bcfile -<.> "exe")
       run (bcfile -<.> "exe") [] `shouldReturn` (1, "", "")
       run (bcfile -<.> "exe") ["x"] `shouldReturn` (4, "", "")
+
+    it "should be able to encode float values" $ do
+      let bcfile = "test/float-value.bc"
+          testModule :: Module
+          testModule = mod "undef"
+            [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
+                block "entry" $ do
+                  tmpl <- global private "tmpl" =<< cStr "float: %hf"
+                  strPtr <- gep tmpl =<< sequence [int32 0, int32 0]
+                  printf <- fun "printf" =<< (vararg $ [i8ptr] --> i32)
+                  -- printf expects all floats to be promoted to double.
+                  -- so we fpExt it to double (f64)
+                  flt <- bind2 fpExt f64 (float 1.25)
+                  ccall printf [strPtr, flt]
+                  ret =<< int32 0
+            ]
+      -- putStrLn . show . pretty $ testModule 
+      writeModule bcfile testModule
+      decompile bcfile `shouldReturn` (bcfile -<.> "dis")
+      compile bcfile `shouldReturn` (bcfile -<.> "exe")
+      run (bcfile -<.> "exe") [] `shouldReturn` (0, "float: 1.250000", "")
+
+    it "should be able to encode double values" $ do
+      let bcfile = "test/double-value.bc"
+          testModule :: Module
+          testModule = mod "undef"
+            [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> do
+                block "entry" $ do
+                  tmpl <- global private "tmpl" =<< cStr "double: %f"
+                  strPtr <- gep tmpl =<< sequence [int32 0, int32 0]
+                  printf <- fun "printf" =<< (vararg $ [i8ptr] --> i32)
+                  flt <- double 1.23
+                  ccall printf [strPtr, flt]
+                  ret =<< int32 0
+            ]
+      -- putStrLn . show . pretty $ testModule 
+      writeModule bcfile testModule
+      decompile bcfile `shouldReturn` (bcfile -<.> "dis")
+      compile bcfile `shouldReturn` (bcfile -<.> "exe")
+      run (bcfile -<.> "exe") [] `shouldReturn` (0, "double: 1.230000", "")
+
 
 {- -- This won't work with functions. Only with external symbols.
     it "should be able to handle external labels" $ do

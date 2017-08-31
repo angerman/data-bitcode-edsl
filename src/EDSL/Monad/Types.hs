@@ -42,12 +42,10 @@ f 80 = f80
 f 128 = f128
 f _ = error "invalid float type"
 
-half, f16, f32, double, f64, f80, f128 :: (HasCallStack, Monad m) => EdslT m Ty
-half = tellType Half
-f16 = half
+f16, f32, f64, f80, f128 :: (HasCallStack, Monad m) => EdslT m Ty
+f16 = tellType Half
 f32 = tellType Float
-double = tellType Double
-f64 = double
+f64 = tellType Double
 f80 = tellType X86Fp80
 f128 = tellType Fp128
 

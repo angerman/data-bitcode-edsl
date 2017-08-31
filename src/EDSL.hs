@@ -29,12 +29,17 @@ import EDSL.Monad.EdslT (evalEdslT, withResolver)
 
 import Prelude hiding (mod, writeFile)
 
-import Data.BitCode.Writer.Monad (writeFile)
-import Data.BitCode.Writer (emitTopLevel)
-import Data.BitCode.Writer.Combinators (withHeader)
 import Data.BitCode.LLVM.ToBitCode
 import Data.BitCode (denormalize)
 import Data.BitCode.LLVM.Codes.Identification (Epoch(Current))
+
+-- Bitcode writing
+import qualified Data.BitCode.Writer.Monad as Bitcode (writeFile)
+import qualified Data.BitCode.Writer as Bitcode (emitTopLevel)
+import qualified Data.BitCode.Writer.Combinators as Bitcode (withHeader)
+-- Bitstream writing
+import qualified Data.Bitstream as Bitstream
+import qualified Data.ToBits    as Bitstream
 
 import Data.BitCode.LLVM.Types
 import Data.BitCode.LLVM.Util (lower)
@@ -61,12 +66,15 @@ import qualified Data.Set as Set
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.List (sort, nub, sortBy)
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isJust)
 import Control.Applicative ((<|>))
 import Control.Monad (liftM2)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Fix (MonadFix)
 import Control.Monad.Trans.Except (ExceptT(..), runExceptT, throwE)
+
+import qualified System.Environment as Env (lookupEnv)
+import System.FilePath ((-<.>))
 
 import Data.Binary (encodeFile)
 
@@ -120,7 +128,7 @@ defT :: (HasCallStack, Monad m)
 defT mod name sig body = do sig' <- sig
                             body (args sig')
                             mkFunc sig' =<< mod
-  where args sig = zipWith (\t -> Val.mkUnnamed t . Val.Arg t) (Ty.teParamTy sig) [0..]
+  where args sig = zipWith (\t i -> Val.withArgIndex (const (fromIntegral i)) . Val.mkUnnamed t . Val.Arg t $ i) (Ty.teParamTy sig) [0..]
         mkFunc :: (HasCallStack, Monad m) => Ty.Ty -> (Val.Value -> Val.Value) -> EdslT m Func.Function
         mkFunc sig mod = Func.Function <$> deffun mod name sig <*> pure [] <*> lift (takeBlocks 0)
 
@@ -169,6 +177,16 @@ mod' :: (HasCallStack, Monad m, MonadFix m)
      -> [EdslT m Val.Symbol]    -- ^ module globals
      -> [EdslT m Func.Function] -- ^ module functions
      -> m (Either Error Module)
+mod' name [] [] = return . pure $ Module { mVersion    = 1
+                                         , mTriple     = Nothing
+                                         , mDatalayout = Nothing
+                                         , mValues = []
+                                         , mDecls = []
+                                         , mDefns = []
+                                         , mFns = []
+                                         , mTypes = []
+                                         , mConsts = []
+                                         }
 mod' name modGlobals fns = evalEdslT 0 go 
   where go = mdo
           lift (setGOffset id)
@@ -224,7 +242,7 @@ mod' name modGlobals fns = evalEdslT 0 go
               
           -- let labelMap' = Map.fromList labelMap
               -- resolver name = fromMaybe (error $ "unable to resovle function " ++ show name) $ Map.lookup name labelMap'
-          types <- lift askTypes
+          types <- lift askTypeList
           consts <- lift askConsts
 
 
@@ -243,7 +261,22 @@ mod' name modGlobals fns = evalEdslT 0 go
 --------------------------------------------------------------------------------
 -- I/O
 writeModule :: HasCallStack => FilePath -> Module -> IO ()
-writeModule f = writeFile f . withHeader True . emitTopLevel . map denormalize . toBitCode . (Just (Ident "Data.BitCode.LLVM" Current),)
+writeModule f m = do
+  let bc = map denormalize
+           . toBitCode
+           . (Just (Ident "Data.BitCode.LLVM" Current),) $ m
+
+  whenM (isJust <$> (Env.lookupEnv "LLVM_DUMP_BC")) $ do
+    encodeFile (f -<.> "bcbin") bc
+  
+  Bitstream.writeFile f
+    . Bitstream.withHeader True
+    . Bitstream.emitTopLevel $ bc
+
+  where whenM :: Monad m => m Bool -> m () -> m ()
+        whenM c a = c >>= \case
+          True -> a
+          False -> return ()
 
 dumpModuleBitcodeAST :: HasCallStack => FilePath -> Module -> IO ()
 dumpModuleBitcodeAST f = encodeFile f . map denormalize . toBitCode . (Just (Ident "Data.BitCode.LLVM" Current),)

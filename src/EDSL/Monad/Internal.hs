@@ -18,7 +18,7 @@ module EDSL.Monad.Internal
   , tellFunc, tellDecl
   , tellGlobal', tellGlobal, askGlobals
   , tellConst, askConsts
-  , tellType, askTypes
+  , tellType, askTypes, askTypeList
   , askDecls, askFuncs
   , buildResolver, setResolver 
   , Offset
@@ -48,6 +48,9 @@ import qualified Data.BitCode.LLVM.Type            as Ty
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Map as Map
+
+import Data.List (sortBy)
+import Data.Function (on)
 
 import Control.Monad (forM)
 import Control.Monad.IO.Class
@@ -154,12 +157,18 @@ insert' x0 = go x0 x0
 
 newtype Label = Label (String, Ty.Ty, Maybe Val.Value) deriving (Ord, Eq, Show)
 
+data IndexedType = ITy { _tIdx :: Int, _tTy :: Ty.Ty } deriving (Show)
+instance Eq IndexedType where
+  (ITy _ lhs) == (ITy _ rhs) = lhs == rhs
+instance Ord IndexedType where
+  (ITy _ lhs) `compare` (ITy _ rhs) = lhs `compare` rhs
+
 type Labels = Set Label
 type Consts = Set Val.Symbol
 type Globals = Set Val.Symbol
 type Funcs  = Set Val.Symbol
 type Decls  = Set Val.Symbol
-type Types = Set Ty.Ty
+type Types = Set IndexedType
 
 type Resolver = String -> Val.Symbol
 
@@ -345,12 +354,17 @@ askConsts = getsCtx consts
 
 tellType :: Monad m => Ty.Ty -> BodyBuilderT m Ty.Ty
 tellType t = do
-  modifyCtx (\ctx -> ctx { types = Set.insert t (types ctx) })
-  return t
+  types <- askTypes
+  let i = Set.size types 
+      (ITy _ t', types') = insert' (ITy i t) types 
+  modifyCtx (\ctx -> ctx { types = types' })
+  return t'
 
 askTypes :: Monad m => BodyBuilderT m Types
 askTypes = getsCtx types
 
+askTypeList :: Monad m => BodyBuilderT m [Ty.Ty]
+askTypeList = map _tTy . sortBy (compare `on` _tIdx) . Set.toList <$> askTypes 
 
 instName :: Inst.Inst -> String
 instName (Inst.BinOp _ _ _ _ _) = "BinOp"
@@ -384,7 +398,9 @@ tellInst inst = do
   modifyCtx (\c -> c { _insts = inst:(_insts c) })
   
   nr <- getsCtx nRef
-  case (\t -> Val.mkUnnamed t $ Val.TRef t nr) <$> instTy inst of
+  case (\t ->   Val.withInstIndex (const (fromIntegral nr))
+              . Val.mkUnnamedInst t
+              $ Val.TRef t nr) <$> instTy inst of
     ref@(Just s) -> do tellType (ty s) -- record the instruction type
                        modifyCtx (\ctx -> ctx { nInst  = 1 + nInst ctx
                                               , nRef   = 1 + nRef ctx

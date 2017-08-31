@@ -7,6 +7,7 @@ import EDSL.Monad.EdslT
 import EDSL.Monad.Types
 import EDSL.Monad.Default
 
+import Data.BitCode.FloatCast
 import Data.BitCode.LLVM.Type (Ty, isPtr)
 import Data.BitCode.LLVM.Value
 import Data.BitCode.LLVM.CallingConv (CallingConv)
@@ -20,8 +21,9 @@ import qualified Data.BitCode.LLVM.StorageClass    as StorageClass
 import Data.Word (Word16, Word32, Word64)
 import Data.Ratio (numerator)
 
-import GHC.Stack (HasCallStack)
+import Numeric (fromRat)
 
+import GHC.Stack (HasCallStack)
 
 bind2 f x y = do x' <- x; y' <- y; f x' y'
 
@@ -47,10 +49,10 @@ label :: (HasCallStack, Monad m) => String -> Ty -> EdslT m Symbol
 label name ty = tellLabel name ty Nothing 
 
 -- | Globals (tracked in the monad)
-global :: (HasCallStack, Monad m) => String -> Symbol -> EdslT m Symbol
-global name val = do
+global :: (HasCallStack, Monad m) => (Value -> Value) -> String -> Symbol -> EdslT m Symbol
+global mod name val = do
   t <- ptr (ty val)
-  tellGlobal' . mkNamed t name . trace ("[global] accessing global " ++ name) . withInit val . defGlobal $ t
+  tellGlobal' . mkNamed t name . mod . withInit val . defGlobal $ t
 
 extGlobal :: (HasCallStack, Monad m) => String -> Ty -> EdslT m Symbol
 extGlobal name ty = tellGlobal . mkNamed ty name =<< defGlobal <$> (ptr ty)
@@ -105,8 +107,8 @@ int16 = int 16
 int32 = int 32
 int64 = int 64
 
-float :: (HasCallStack, Monad m) => Int -> Rational -> EdslT m Symbol
-float w r = tellConst =<< uconst <$> (f w) <*> pure (mkF w r)
+floating :: (HasCallStack, Monad m) => Int -> Rational -> EdslT m Symbol
+floating w r = tellConst =<< uconst <$> (f w) <*> pure (mkF w r)
   where mkF w r
           | w == 16  = Float (FpHalf      (toWord16 r))
           | w == 32  = Float (FpSingle    (toWord32 r))
@@ -117,20 +119,19 @@ float w r = tellConst =<< uconst <$> (f w) <*> pure (mkF w r)
                 toWord16 r | numerator r == 0 = 0
                            | otherwise        = undefined
                 toWord32 :: Rational -> Word32
-                toWord32 = undefined
+                toWord32 = floatToWord . fromRat
                 toWord64 :: Rational -> Word64
-                toWord64 = undefined
+                toWord64 = doubleToWord . fromRat
                 toDoubleExt :: Rational -> (Word64, Word64)
                 toDoubleExt = undefined
                 toQuad :: Rational -> (Word64, Word64)
                 toQuad = undefined
 
-float16, float32, float64, float80, float128 :: (HasCallStack, Monad m) => Rational -> EdslT m Symbol
-float16 = float 16
-float32 = float 32
-float64 = float 64
-float80 = float 80
-float128 = float128
+half, float, double, quad :: (HasCallStack, Monad m) => Rational -> EdslT m Symbol
+half   = floating 16
+float  = floating 32
+double = floating 64
+quad   = floating 128
 
 undef :: (HasCallStack, Monad m) => Ty -> EdslT m Symbol
 undef t = tellConst . mkUnnamed t $ Constant t Undef 
