@@ -32,7 +32,6 @@ library
     , filepath
     , base16-bytestring
     , data-bitcode
-    , data-bitstream
     , data-bitcode-llvm
     , transformers
   exposed-modules:
@@ -71,7 +70,6 @@ test-suite spec
                      , process
                      , filepath
                      , data-bitcode
-                     , data-bitstream
                      , data-bitcode-llvm
                      , data-bitcode-edsl
   default-language:  Haskell2010

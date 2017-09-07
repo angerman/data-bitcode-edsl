@@ -34,12 +34,8 @@ import Data.BitCode (denormalize)
 import Data.BitCode.LLVM.Codes.Identification (Epoch(Current))
 
 -- Bitcode writing
-import qualified Data.BitCode.Writer.Monad as Bitcode (writeFile)
+import qualified Data.BitCode.Writer.Monad as Bitcode (writeFile, withHeader)
 import qualified Data.BitCode.Writer as Bitcode (emitTopLevel)
-import qualified Data.BitCode.Writer.Combinators as Bitcode (withHeader)
--- Bitstream writing
-import qualified Data.Bitstream as Bitstream
-import qualified Data.ToBits    as Bitstream
 
 import Data.BitCode.LLVM.Types
 import Data.BitCode.LLVM.Util (lower)
@@ -268,10 +264,10 @@ writeModule f m = do
 
   whenM (isJust <$> (Env.lookupEnv "LLVM_DUMP_BC")) $ do
     encodeFile (f -<.> "bcbin") bc
-  
-  Bitstream.writeFile f
-    . Bitstream.withHeader True
-    . Bitstream.emitTopLevel $ bc
+
+  Bitcode.writeFile f
+    . Bitcode.withHeader True
+    . Bitcode.emitTopLevel $ bc
 
   where whenM :: Monad m => m Bool -> m () -> m ()
         whenM c a = c >>= \case

@@ -12,9 +12,8 @@ import Data.BitCode.LLVM.FromBitCode hiding (BitCode)
 import Data.BitCode.Reader.Monad
 import Data.BitCode.Reader.Combinators
 import Data.BitCode.Reader
-import Data.BitCode.Writer.Monad (writeFile)
+import Data.BitCode.Writer.Monad (writeFile, withHeader)
 import Data.BitCode.Writer (emitTopLevel)
-import Data.BitCode.Writer.Combinators
 import System.Environment (getArgs)
 import Debug.Trace (traceM)
 
