@@ -30,7 +30,6 @@ library
     , bytestring >= 0.10
     , containers
     , filepath
-    , base16-bytestring
     , data-bitcode
     , data-bitcode-llvm
     , transformers
