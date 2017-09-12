@@ -18,11 +18,14 @@ import GHC.Stack (HasCallStack)
 
 -- ** Atomic Op
 atomicLoad :: (HasCallStack, Monad m) => Symbol -> AtomicOrdering -> AtomicSynchScope -> EdslT m Symbol
-atomicLoad s o ss | isPtr (ty s) = tellInst' =<< Inst.AtomicLoad <$> deptr (ty s) <*> pure s <*> pure 0 <*> pure o <*> pure ss
+atomicLoad s o ss | isPtr (ty s) = tellInst' =<< Inst.AtomicLoad <$> deptr (ty s) <*> pure s <*> pure align <*> pure o <*> pure ss
                   | otherwise    = sthrowE $ text "Cannot atomic load:" <+> pretty s <+> text "must be of pointer type!"
+  where align = 1 -- TODO: this should be ABI specific
+
 atomicStore :: (HasCallStack, Monad m) => Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> EdslT m ()
-atomicStore s t o ss | lower (ty t) == ty s = tellInst (Inst.AtomicStore t s 0 o ss) >> pure ()
+atomicStore s t o ss | lower (ty t) == ty s = tellInst (Inst.AtomicStore t s align o ss) >> pure ()
                      | otherwise = sthrowE $ text "can not atomic store:" <+> pretty s <+> text "in" <+> pretty t
+  where align = 1 -- TODO: this should be ABI specific; however 1 should be safe, even though it might not produce optimal results.
 
 cmpXchg :: (HasCallStack, Monad m) => Symbol -> Symbol -> Symbol -> AtomicOrdering -> AtomicSynchScope -> AtomicOrdering -> EdslT m Symbol
 cmpXchg ptr cmp val ord scope failOrd | lower (ty ptr) == ty cmp && ty cmp == ty val = tellInst' (Inst.CmpXchg ptr cmp val ord scope failOrd)

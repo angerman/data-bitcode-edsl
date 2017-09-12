@@ -48,16 +48,16 @@ alloca :: (HasCallStack, Monad m) => Ty -> Symbol -> EdslT m Symbol
 alloca ty size = tellInst' =<< Inst.Alloca <$> ptr ty <*> pure size <*> pure 0
 
 load :: (HasCallStack, Monad m) => Symbol -> EdslT m Symbol
-load s {- | isPtr (ty s)-} = tellInst' =<< Inst.Load <$> (deptr (ty s)) <*> pure s <*> pure 0
---       | otherwise    = sthrowE $ text "Cannlot load:" <+> pretty s <+> text "must be of pointer type!"
+load s | isPtr (ty s) = tellInst' =<< Inst.Load <$> (deptr (ty s)) <*> pure s <*> pure 0
+       | otherwise    = sthrowE $ text "Cannlot load:" <+> pretty s <+> text "must be of pointer type!"
 store :: (HasCallStack, Monad m)
       => Symbol -- ^ Source
       -> Symbol -- ^ Target
       -> EdslT m ()
-store target source = tellInst (Inst.Store target source 0) >> pure ()
---  | not (isPtr (ty target))        = sthrowE $ text "can not store" <+> pretty source <+> text "in" <+> pretty target <+> text "Target" <+> pretty target <+> text "must be of ptr type."
---  | lower (ty target) == ty source = tellInst (Inst.Store target source 0) >> pure ()
---  | otherwise                      = sthrowE $ text "can not store " <+> pretty source <+> text "in" <+> pretty target  
+store target source -- = tellInst (Inst.Store target source 0) >> pure ()
+  | not (isPtr (ty target))        = sthrowE $ text "can not store" <+> pretty source <+> text "in" <+> pretty target <+> text "Target" <+> pretty target <+> text "must be of ptr type."
+  | lower (ty target) == ty source = tellInst (Inst.Store target source 0) >> pure ()
+  | otherwise                      = sthrowE $ text "can not store " <+> pretty source <+> text "in" <+> pretty target
 
 call' :: (HasCallStack, Monad m) => TailCallKind -> CallingConv -> Symbol -> [Symbol] -> EdslT m (Maybe Symbol)
 call' tck cc f args
@@ -103,7 +103,7 @@ ubr = tellInst . Inst.UBr
 br :: Monad m => Symbol -> BasicBlockId -> BasicBlockId -> EdslT m () -- (Maybe Symbol)
 br cond l r {- | isBoolTy cond -} = trace "[br]" <$> tellInst (Inst.Br cond l r) >> pure ()
             -- | otherwise     = sthrowE $ text "Cannot branch with " <+> pretty cond <+> text " condition. Must be i1 (Bool)"
-            
+
 switch :: Monad m => Symbol -> BasicBlockId -> [(Symbol, BasicBlockId)] -> EdslT m ()
 switch cond def cases = trace "[switch]" <$> tellInst (Inst.Switch cond def cases) >> pure ()
 

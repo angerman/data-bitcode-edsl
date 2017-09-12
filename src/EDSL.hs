@@ -263,6 +263,7 @@ writeModule f m = do
            . (Just (Ident "Data.BitCode.LLVM" Current),) $ m
 
   whenM (isJust <$> (Env.lookupEnv "LLVM_DUMP_BC")) $ do
+    putStrLn $ "Writing " ++ (f -<.> "bcbin")
     encodeFile (f -<.> "bcbin") bc
 
   Bitcode.writeFile f

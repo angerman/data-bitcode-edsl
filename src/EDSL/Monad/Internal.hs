@@ -20,7 +20,7 @@ module EDSL.Monad.Internal
   , tellConst, askConsts
   , tellType, askTypes, askTypeList
   , askDecls, askFuncs
-  , buildResolver, setResolver 
+  , buildResolver, setResolver
   , Offset
   , setGOffset, setDOffset, setFOffset, setCOffset
   -- * Debugging
@@ -52,7 +52,7 @@ import qualified Data.Map as Map
 import Data.List (sortBy)
 import Data.Function (on)
 
-import Control.Monad (forM)
+import Control.Monad (forM, forM_, when)
 import Control.Monad.IO.Class
 import Control.Monad.Trans.State
 import Data.Functor.Identity
@@ -70,6 +70,10 @@ import EDSL.Monad.PtrEquality (ptrEq)
 #if __GLASGOW_HASKELL__
 import GHC.Exts ( build, lazy )
 #endif
+
+import qualified System.Environment as Env (lookupEnv)
+import Data.Maybe (isJust)
+import System.IO.Unsafe (unsafePerformIO)
 
 trace :: String -> a -> a
 trace _ x = x
@@ -172,6 +176,10 @@ type Types = Set IndexedType
 
 type Resolver = String -> Val.Symbol
 
+{-# NOINLINE llvmDebugResolverFlag #-}
+llvmDebugResolverFlag :: Bool
+llvmDebugResolverFlag = unsafePerformIO $ isJust <$> Env.lookupEnv "LLVM_DEBUG_RESOLVER"
+
 data FnCtx = FnCtx
   { nInst :: Int
   , nRef :: Int
@@ -259,20 +267,20 @@ evalBodyBuilder instOffset = runIdentity . evalBodyBuilderT instOffset
 
 
 -- | Adds an instruction to a block.
-addInst :: Fn.BasicBlock -> Fn.BlockInst -> Fn.BasicBlock
+addInst :: HasCallStack => Fn.BasicBlock -> Fn.BlockInst -> Fn.BasicBlock
 addInst (Fn.BasicBlock is) i = (Fn.BasicBlock (i:is))
 addInst (Fn.NamedBlock n is) i = (Fn.NamedBlock n (i:is))
 
-tellLog :: Monad m => String -> BodyBuilderT m ()
+tellLog :: (HasCallStack, Monad m) => String -> BodyBuilderT m ()
 tellLog l = modifyCtx (\c -> c { _log = l:(_log c) })
 
 tellLogShow :: (Monad m, Show s) => s -> BodyBuilderT m () 
 tellLogShow = tellLog . show
 
-askLog :: Monad m => BodyBuilderT m String
+askLog :: (HasCallStack, Monad m) => BodyBuilderT m String
 askLog = unlines . fmap ('\t':) . reverse <$> getsCtx _log
 
-askInsts :: Monad m => Int -> BodyBuilderT m [Fn.BlockInst]
+askInsts :: (HasCallStack, Monad m) => Int -> BodyBuilderT m [Fn.BlockInst]
 askInsts n = do
   bbs <- getsCtx blocks
   if (null bbs)
@@ -290,21 +298,21 @@ tellLabel name t mbVal = do
   resolve <- getsCtx resolver
   return $ Val.Lazy name t (const (resolve name))
 
-askLabels :: Monad m => BodyBuilderT m Labels
+askLabels :: (HasCallStack, Monad m) => BodyBuilderT m Labels
 askLabels = getsCtx labels
 
-tellGlobal :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellGlobal :: (HasCallStack, Monad m) => Val.Symbol -> BodyBuilderT m Val.Symbol
 tellGlobal g = case Val.symbolValue g of
   Val.Function{} -> tellFunction g
   Val.Global{}   -> tellGlobal'  g
   Val.Constant{} -> tellConst    g
 
-tellFunction :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellFunction :: (HasCallStack, Monad m) => Val.Symbol -> BodyBuilderT m Val.Symbol
 tellFunction f = case Val.feProto (Val.fExtra (Val.symbolValue f)) of
   True  -> tellDecl f
   False -> tellFunc f
 
-tellDecl :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellDecl :: (HasCallStack, Monad m) => Val.Symbol -> BodyBuilderT m Val.Symbol
 tellDecl f = do
   decls  <- askDecls
   offset <- getsCtx dOffset
@@ -313,10 +321,10 @@ tellDecl f = do
   modifyCtx (\ctx -> ctx { decls = decls' })
   return f'
 
-askDecls :: Monad m => BodyBuilderT m Decls
+askDecls :: (HasCallStack, Monad m) => BodyBuilderT m Decls
 askDecls = getsCtx decls
 
-tellFunc :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellFunc :: (HasCallStack, Monad m) => Val.Symbol -> BodyBuilderT m Val.Symbol
 tellFunc f = do
   funcs <- askFuncs
   offset <- getsCtx fOffset
@@ -325,10 +333,10 @@ tellFunc f = do
   modifyCtx (\ctx -> ctx { funcs = funcs' })
   return f'
 
-askFuncs :: Monad m => BodyBuilderT m Funcs
+askFuncs :: (HasCallStack, Monad m) => BodyBuilderT m Funcs
 askFuncs = getsCtx funcs
 
-tellGlobal' :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellGlobal' :: (HasCallStack, Monad m) => Val.Symbol -> BodyBuilderT m Val.Symbol
 tellGlobal' g = do
   globals <- askGlobals
   offset  <- getsCtx gOffset
@@ -337,36 +345,36 @@ tellGlobal' g = do
   modifyCtx (\ctx -> ctx { globals = globals' })
   return g'
 
-askGlobals :: Monad m => BodyBuilderT m Globals
+askGlobals :: (HasCallStack, Monad m) => BodyBuilderT m Globals
 askGlobals = getsCtx globals
 
-tellConst :: Monad m => Val.Symbol -> BodyBuilderT m Val.Symbol
+tellConst :: (HasCallStack, Monad m) => Val.Symbol -> BodyBuilderT m Val.Symbol
 tellConst c = do
   consts <- askConsts
   offset <- getsCtx cOffset
   let i = fromIntegral $ Set.size consts
-      (c', consts') = insert' (Val.withIndex (\_ -> offset i) c) consts 
+      (c', consts') = insert' (Val.withIndex (\_ -> offset i) c) consts
   modifyCtx (\ctx -> ctx { consts = consts' })
   return c'
 
-askConsts :: Monad m => BodyBuilderT m Consts
+askConsts :: (HasCallStack, Monad m) => BodyBuilderT m Consts
 askConsts = getsCtx consts
 
-tellType :: Monad m => Ty.Ty -> BodyBuilderT m Ty.Ty
+tellType :: (HasCallStack, Monad m) => Ty.Ty -> BodyBuilderT m Ty.Ty
 tellType t = do
   types <- askTypes
-  let i = Set.size types 
-      (ITy _ t', types') = insert' (ITy i t) types 
+  let i = Set.size types
+      (ITy _ t', types') = insert' (ITy i t) types
   modifyCtx (\ctx -> ctx { types = types' })
   return t'
 
-askTypes :: Monad m => BodyBuilderT m Types
+askTypes :: (HasCallStack, Monad m) => BodyBuilderT m Types
 askTypes = getsCtx types
 
-askTypeList :: Monad m => BodyBuilderT m [Ty.Ty]
-askTypeList = map _tTy . sortBy (compare `on` _tIdx) . Set.toList <$> askTypes 
+askTypeList :: (HasCallStack, Monad m) => BodyBuilderT m [Ty.Ty]
+askTypeList = map _tTy . sortBy (compare `on` _tIdx) . Set.toList <$> askTypes
 
-instName :: Inst.Inst -> String
+instName :: HasCallStack => Inst.Inst -> String
 instName (Inst.BinOp _ _ _ _ _) = "BinOp"
 instName (Inst.Cast _t _op _s)      = "Cast (" ++ show _op ++ ")"
 instName (Inst.Alloca _ _ _)    = "Alloca"
@@ -389,7 +397,7 @@ instName (Inst.AtomicLoad _ _ _ _ _) = "Atomic Load"
 -- | Add an instruction to the current block.
 -- returns @Just ref@ if the instruction retuns
 -- a value. @Nothing@ if the instruction has no result.
-tellInst :: Monad m => Inst.Inst -> BodyBuilderT m (Maybe Val.Symbol)
+tellInst :: (HasCallStack, Monad m) => Inst.Inst -> BodyBuilderT m (Maybe Val.Symbol)
 tellInst inst = do
 
   -- [TODO], this adds extra over hread, remove it
@@ -417,25 +425,25 @@ tellInst inst = do
 -- | Add an instruction to the current block
 -- and obtain it's return value.  WARN: Use this
 -- only if you know the instruction returns a value.
-tellInst' :: Monad m => Inst.Inst -> BodyBuilderT m Val.Symbol
+tellInst' :: (HasCallStack, Monad m) => Inst.Inst -> BodyBuilderT m Val.Symbol
 tellInst' inst = tellInst inst >>= \case
   Just s -> pure s
   Nothing -> error ("Expected instruction " ++ instName inst ++ " to return a symbol!")
 
 -- | Adds a new block to the function.
-tellNewBlock :: Monad m => BodyBuilderT m BasicBlockId
+tellNewBlock :: (HasCallStack, Monad m) => BodyBuilderT m BasicBlockId
 tellNewBlock = do
   blockId <- getsCtx (fromIntegral . nBlocks)
   modifyCtx (\c -> c { nBlocks = (nBlocks c) + 1, blocks = (Fn.BasicBlock []):blocks c})
   return blockId
 
-askBlocks :: Monad m => BodyBuilderT m [Fn.BasicBlock]
+askBlocks :: (HasCallStack, Monad m) => BodyBuilderT m [Fn.BasicBlock]
 askBlocks = reverseBlocks <$> getsCtx blocks
   where
     reverseBlocks :: [Fn.BasicBlock] -> [Fn.BasicBlock]
     reverseBlocks = map (Fn.bbmap reverse) . reverse
 
-takeBlocks :: Monad m => Int -> BodyBuilderT m [Fn.BasicBlock]
+takeBlocks :: (HasCallStack, Monad m) => Int -> BodyBuilderT m [Fn.BasicBlock]
 takeBlocks i = do
   blocks <- askBlocks
   modifyCtx (\ctx -> ctx { nInst = i
@@ -448,29 +456,57 @@ takeBlocks i = do
 
 --
 
-buildResolver :: Monad m => BodyBuilderT m Resolver
+buildResolver :: (HasCallStack, Monad m) => BodyBuilderT m Resolver
 buildResolver = do
   defFns <- askFuncs
   refFns <- askDecls
   globs  <- askGlobals
   labels <- Set.toList <$> askLabels
-  let namedValuesMap = Map.fromList [(n, s) | s@(Val.Named n _i _t _v) <- (Set.toList (Set.unions [defFns, refFns, globs]))]
-  map <- Map.fromList <$> (forM labels $ \(Label (n, t, mbVal)) -> case (Map.lookup n namedValuesMap, mbVal) of
-                              (Just s,  _      ) -> return (n, s)
-                              (Nothing, Just v ) -> (n,) <$> tellGlobal (Val.mkNamed t n v)
-                              (Nothing, Nothing) -> (n,) <$> tellGlobal (Val.mkNamed t n (defGlobal t)))
-  
-  return $ \key -> fromMaybe (error "bad resolver!")
-                   . flip Map.lookup map
-                   $ key
-    
+  when llvmDebugResolverFlag $
+    forM_ (zip [0..] labels) $ \(i, l) ->
+      Trace.traceM $ (show i) ++ ": " ++ show l
+  -- Note [Duplicate names in labels]
+  --      We may run into the following situation:
+  -- during construction we add labels of the same
+  -- name to the set of labels.  Some of these may
+  -- carry a default and some not.  This usually
+  -- happens when we have function symbols that are
+  -- cast into ints.  We have one label of type Int
+  -- and one with a function type for the same name.
+  --
+  --      To work around this, we will sort the
+  -- labels in the following way. First take all
+  -- labels that contain a default value.  And then
+  -- take all other labes, that do not have a default
+  -- value, and are not part int he first set.
+  --
 
-setResolver :: Monad m => Resolver -> BodyBuilderT m ()
+  let allValues      = Set.toList $ Set.unions [defFns, refFns, globs]
+      namedValuesMap = Map.fromList [(n, s) | s@(Val.Named n _i _t _v) <- allValues]
+      --
+      (labelsWithDefs, labelsWithDefNames)
+        = unzip [(l,n) | l@(Label (n, _, Just _)) <- labels]
+      (otherLabels, otherLabelNames)
+        = unzip [(l,n) | l@(Label (n, _, Nothing)) <- labels
+                       , not (n `elem` labelsWithDefNames)]
+      labels' = labelsWithDefs ++ otherLabels
+
+  labelMap <- Map.fromListWith (error "Duplicate Key in Labels")
+              <$> (forM labels' $ \(Label (n, t, mbVal)) -> case (Map.lookup n namedValuesMap, mbVal) of
+                      (Just s,  _      ) -> return (n, s)
+                      (Nothing, Just v ) -> (n,) <$> tellGlobal (Val.mkNamed t n v)
+                      (Nothing, Nothing) -> (n,) <$> tellGlobal (Val.mkNamed t n (defGlobal t)))
+
+  return $ \key -> fromMaybe (error "bad resolver!")
+                   . flip Map.lookup labelMap
+                   $ key
+
+setResolver :: (HasCallStack, Monad m) => Resolver -> BodyBuilderT m ()
 setResolver r = modifyCtx (\ctx -> ctx { resolver = r })
 
 type Offset = Word64 -> Word64
 
-setGOffset, setDOffset, setFOffset, setCOffset :: Monad m => Offset -> BodyBuilderT m ()
+setGOffset, setDOffset, setFOffset, setCOffset :: (HasCallStack, Monad m) => Offset -> BodyBuilderT m ()
 setGOffset o = modifyCtx (\ctx -> ctx { gOffset = o })
 setDOffset o = modifyCtx (\ctx -> ctx { dOffset = o })
 setFOffset o = modifyCtx (\ctx -> ctx { fOffset = o })

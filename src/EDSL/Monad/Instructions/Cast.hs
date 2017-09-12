@@ -21,7 +21,7 @@ import Debug.Trace
 trunc, zext, sext, fpToUi, fpToSi, uiToFp, siToFp, fpTrunc, fpExt, ptrToInt, intToPtr, bitcast, addrSpCast
   :: (HasCallStack, Monad m) => Ty -> Symbol -> EdslT m Symbol
 mkCast :: (HasCallStack, Monad m) => CastOp -> Ty -> Symbol -> EdslT m Symbol
-mkCast op t = tellInst' . Inst.Cast t op 
+mkCast op t = tellInst' . Inst.Cast t op
 
 trunc t = mkCast TRUNC t
 zext t s | ty s /= t = mkCast ZEXT t s

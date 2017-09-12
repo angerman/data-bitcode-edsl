@@ -13,7 +13,7 @@ import EDSL.Monad.Instructions
 
 import Data.BitCode.LLVM (Module)
 import Data.BitCode.LLVM.Classes.HasType (ty)
-import Data.BitCode.LLVM.Value (private)
+import Data.BitCode.LLVM.Value (private, mutable)
 
 import Data.BitCode.LLVM.Pretty
 
@@ -172,9 +172,9 @@ spec_edsl = do
             [ def "main" ([i32, ptr =<< i8ptr] --> i32) $ \[ argc, argv ] -> mdo
                 block "entry" $ do
                   mem <- undef =<< (arr 10 =<< i8)
-                  memG <- global private "mem" mem 
+                  memG <- global (mutable . private) "mem" mem
                   ptr <- gep memG =<< sequence [int32 0, int32 0]
-                  memset <- fun "llvm.memset.p0i8.i32" =<< [i8ptr, i8, i32, i32, i1] --> void 
+                  memset <- fun "llvm.memset.p0i8.i32" =<< [i8ptr, i8, i32, i32, i1] --> void
                   ccall memset =<< (ptr:) <$> sequence [ int8 0, int32 10, int32 4, int 1 0 ]
                   ret =<< int32 0
                 pure ()
@@ -211,10 +211,10 @@ spec_edsl = do
                 block "entry" $ do
                   argcSlot <- bind2 alloca i32 (int32 1) -- space for 1 i32
                   store argcSlot argc
-            
+
                   argvSlot <- bind2 alloca (ptr =<< i8ptr) (int32 1)
                   store argvSlot argv
-            
+
                   ret =<< int32 0
                 pure ()
             ]
@@ -233,7 +233,7 @@ spec_edsl = do
                   -- refernece count here
                   argcSlot <- bind2 alloca i32 (int32 1) -- space for 1 i32
                   store argcSlot argc
-            
+
                   argvSlot <- bind2 alloca (ptr =<< i8ptr) (int32 1)
                   store argvSlot argv
 
@@ -264,7 +264,7 @@ spec_edsl = do
                   Just r <- ccall square [argc]
                   ret r
             ]
-      -- putStrLn . show . pretty $ testModule 
+      -- putStrLn . show . pretty $ testModule
       writeModule bcfile testModule
       decompile bcfile `shouldReturn` (bcfile -<.> "dis")
       compile bcfile `shouldReturn` (bcfile -<.> "exe")
@@ -286,7 +286,7 @@ spec_edsl = do
                   ccall printf [strPtr, flt]
                   ret =<< int32 0
             ]
-      -- putStrLn . show . pretty $ testModule 
+      -- putStrLn . show . pretty $ testModule
       writeModule bcfile testModule
       decompile bcfile `shouldReturn` (bcfile -<.> "dis")
       compile bcfile `shouldReturn` (bcfile -<.> "exe")
