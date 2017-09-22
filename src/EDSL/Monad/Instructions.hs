@@ -12,6 +12,8 @@ module EDSL.Monad.Instructions
   ,gep, extractValue)
   where
 
+import Prelude hiding ((<>))
+
 -- import EDSL.Monad.Internal
 import EDSL.Monad.EdslT
 

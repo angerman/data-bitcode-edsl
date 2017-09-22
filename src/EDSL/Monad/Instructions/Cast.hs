@@ -1,5 +1,7 @@
 module EDSL.Monad.Instructions.Cast where
 
+import Prelude hiding ((<>))
+
 import EDSL.Monad.EdslT
 
 import Data.BitCode.LLVM.Opcodes.Cast
