@@ -10,6 +10,7 @@ module EDSL
   , module EDSL.Monad.Values
   , module EDSL.Monad.Instructions
   , Result(..)
+  , Module(..)
   , block, block', block''
   , def, defT, defM
   , ghcdef, ghcdefT
