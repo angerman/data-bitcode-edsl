@@ -491,7 +491,8 @@ buildResolver = do
                        , not (n `elem` labelsWithDefNames)]
       labels' = labelsWithDefs ++ otherLabels
 
-  labelMap <- Map.fromListWith (error "Duplicate Key in Labels")
+  labelMap <- Map.fromListWithKey (\k v v' -> if v == v' then v
+                                              else error $ "Duplicate Key in Labels: " ++ show k ++ "\n\t - " ++ show v ++ "\n\t - " ++ show v')
               <$> (forM labels' $ \(Label (n, t, mbVal)) -> case (Map.lookup n namedValuesMap, mbVal) of
                       (Just s,  _      ) -> return (n, s)
                       (Nothing, Just v ) -> (n,) <$> tellGlobal (Val.mkNamed t n v)
