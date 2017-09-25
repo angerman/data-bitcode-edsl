@@ -20,6 +20,6 @@ helloWorld = mod "helloWorld"
         square <- fun "square" =<< [i32] --> i32
         Just sq <- ccall square =<< sequence [int32 3]
         printf <- fun "printf" =<< (vararg $ [i8ptr] --> i32)
-        ccall printf [strPtr, sq]
+        _ <- ccall printf [strPtr, sq]
         ret =<< int32 0
   ]
