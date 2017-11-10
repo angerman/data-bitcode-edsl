@@ -8,7 +8,7 @@ import Data.BitCode
 import Data.BitCode.LLVM
 import Data.BitCode.LLVM.Classes.HasType
 import Data.BitCode.LLVM.Reader.Monad
-import Data.BitCode.LLVM.FromBitCode hiding (BitCode)
+import Data.BitCode.LLVM.FromBitCode
 import Data.BitCode.Reader.Monad
 import Data.BitCode.Reader.Combinators
 import Data.BitCode.Reader
