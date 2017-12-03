@@ -102,6 +102,12 @@ str s | length s > 0 = tellConst =<< uconst <$> (arr (length s) =<< i8) <*> pure
 struct :: (HasCallStack, Monad m) => [Symbol] -> EdslT m Symbol
 struct ss = tellConst =<< uconst <$> (ustruct $ map ty ss) <*> pure (trace "accessing struct" (Struct (trace "accessing struct symbols" ss)))
 
+-- unpacked struct constant
+-- | Construct a struct symbol (unnamed value)
+packedStruct :: (HasCallStack, Monad m) => [Symbol] -> EdslT m Symbol
+packedStruct ss = tellConst =<< uconst <$> (pstruct $ map ty ss) <*> pure (trace "accessing struct" (Struct (trace "accessing struct symbols" ss)))
+
+
 int :: (HasCallStack, Monad m, Integral a, Integral b) => a -> b -> EdslT m Symbol
 int w n = tellConst =<< trace "[uconst const int]" . uconst . trace "[const int]" <$> (i w) <*> pure (Int (fromIntegral n))
 
